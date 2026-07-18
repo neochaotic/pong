@@ -210,6 +210,15 @@
     if (form && typeof form.requestSubmit === "function") form.requestSubmit();
   }
 
+  // An SSO hop lands the webview on an identity provider - Google, Okta, Azure.
+  // Those pages hold the user's real password field, and the probe selectors
+  // are meaningless there. Acting on a host we were not pointed at could type
+  // into a credential form, so every entry point checks this first.
+  var onExpectedHost = function (p) {
+    if (!p.expected_host) return true;
+    return location.hostname === p.expected_host;
+  };
+
   window.__PONG__ = {
     // Read-only DOM inspection: which of the two markers is on screen?
     probe: function (p) {
@@ -221,6 +230,15 @@
     // Cheap status question asked before committing to a full check.
     heartbeat: function (p) {
       var started = performance.now();
+      if (!onExpectedHost(p)) {
+        invoke({
+          code: 401,
+          detail: "redirected to " + location.hostname + " (sign-in required)",
+          latency_ms: 0,
+          nonce: p.nonce,
+        });
+        return;
+      }
       var r = this.probe(p);
       invoke({
         code: r.code,
@@ -244,6 +262,9 @@
       };
 
       try {
+        if (!onExpectedHost(p)) {
+          return done(401, "redirected to " + location.hostname + " (sign-in required)");
+        }
         if (document.readyState === "loading") {
           await new Promise(function (r) {
             document.addEventListener("DOMContentLoaded", r, { once: true });

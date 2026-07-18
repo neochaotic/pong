@@ -300,6 +300,19 @@ lists the origins allowed to use it.
 > **Ports are a separate URLPattern component.** `https://*/*` does **not** match
 > `http://localhost:8899`. Include `*:*` patterns if you monitor a non-standard port.
 
+### SSO redirects
+
+Signing in through an identity provider (Google, Okta, Azure AD) navigates the webview to
+*their* domain — a page holding the user's real password field, where the probe selectors mean
+nothing.
+
+The injected agent therefore compares `location.hostname` against the host of `target_url` before
+doing anything, at both entry points. Off-host it reports `401 — redirected to <host>
+(sign-in required)` and touches nothing. Without that guard, a `full` check could type the payload
+into a credential form.
+
+This is also why `interaction` defaults to `probe_only`.
+
 ### Security note
 
 `report_health` is deliberately the *only* command exposed to the dashboard. It accepts a status

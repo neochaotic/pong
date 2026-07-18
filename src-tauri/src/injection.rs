@@ -12,6 +12,8 @@ pub const AGENT_SCRIPT: &str = include_str!("agent.js");
 /// Parameters handed to the agent for a single check.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct InjectionParams {
+    /// Host of the configured target. The agent refuses to act anywhere else.
+    pub expected_host: String,
     pub selectors: Selectors,
     pub payload: String,
     pub settle_ms: u64,
@@ -23,6 +25,10 @@ pub struct InjectionParams {
 impl InjectionParams {
     pub fn from_config(cfg: &Config, nonce: u64) -> Self {
         Self {
+            expected_host: url::Url::parse(&cfg.target_url)
+                .ok()
+                .and_then(|u| u.host_str().map(str::to_owned))
+                .unwrap_or_default(),
             selectors: cfg.selectors.clone(),
             payload: cfg.payload.clone(),
             settle_ms: cfg.settle_ms,
@@ -61,6 +67,7 @@ mod tests {
 
     fn params_with(payload: &str, text_input: &str) -> InjectionParams {
         InjectionParams {
+            expected_host: "dash.internal".into(),
             selectors: Selectors {
                 authenticated: "#dashboard-main".into(),
                 login_indicator: "input[type=password]".into(),
@@ -142,6 +149,27 @@ mod tests {
         let js = build_check_call(&params_with("ping", "textarea"));
         assert!(js.contains("probe agent not installed"), "{js}");
         assert!(js.contains("code:0"), "{js}");
+    }
+
+    #[test]
+    fn carries_the_target_host_so_the_agent_can_refuse_other_origins() {
+        let cfg = Config::from_json(r##"{"target_url":"https://dash.internal/app"}"##).unwrap();
+        let params = InjectionParams::from_config(&cfg, 1);
+        assert_eq!(params.expected_host, "dash.internal");
+
+        let js = build_check_call(&params);
+        assert!(js.contains(r#""expected_host":"dash.internal""#), "{js}");
+    }
+
+    #[test]
+    fn host_is_empty_when_the_url_cannot_be_parsed() {
+        // Validation rejects such a URL long before this point; the agent
+        // treats an empty host as "no restriction" rather than blocking itself.
+        let cfg = Config {
+            target_url: "::not a url::".into(),
+            ..Config::default()
+        };
+        assert_eq!(InjectionParams::from_config(&cfg, 1).expected_host, "");
     }
 
     #[test]
