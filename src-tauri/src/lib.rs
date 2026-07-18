@@ -355,6 +355,9 @@ pub fn run() {
             app.manage(state.clone());
             app.manage(CronHandle::default());
 
+            #[cfg(target_os = "macos")]
+            build_app_menu(&handle)?;
+
             build_popover(&handle)?;
             build_hidden_webview(&handle, &config)?;
             tray::build(&handle)?;
@@ -374,6 +377,56 @@ pub fn run() {
                 }
             }
         });
+}
+
+/// The macOS application menu.
+///
+/// Two reasons this is defined explicitly rather than left to the default:
+/// the menu bar shows the app's name, and — more importantly — without an Edit
+/// submenu the standard Cmd+C/Cmd+V shortcuts do nothing. Pasting a password
+/// from a password manager is exactly what the sign-in window is for.
+#[cfg(target_os = "macos")]
+fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{AboutMetadata, Menu, PredefinedMenuItem, Submenu};
+
+    let about = AboutMetadata {
+        name: Some("Pong".into()),
+        version: Some(env!("CARGO_PKG_VERSION").into()),
+        copyright: Some("Copyright (c) 2026 neochaotic".into()),
+        ..Default::default()
+    };
+
+    let app_menu = Submenu::with_items(
+        app,
+        "Pong",
+        true,
+        &[
+            &PredefinedMenuItem::about(app, Some("Pong"), Some(about))?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::hide(app, None)?,
+            &PredefinedMenuItem::hide_others(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::quit(app, None)?,
+        ],
+    )?;
+
+    let edit_menu = Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, None)?,
+            &PredefinedMenuItem::redo(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, None)?,
+            &PredefinedMenuItem::copy(app, None)?,
+            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::select_all(app, None)?,
+        ],
+    )?;
+
+    app.set_menu(Menu::with_items(app, &[&app_menu, &edit_menu])?)?;
+    Ok(())
 }
 
 /// The small frameless popover anchored near the tray icon.
@@ -413,9 +466,11 @@ fn build_hidden_webview(app: &tauri::AppHandle, config: &Config) -> tauri::Resul
     std::fs::create_dir_all(&data_dir)?;
 
     WebviewWindowBuilder::new(app, MONITOR_LABEL, WebviewUrl::External(url))
-        // Deliberately no fixed `.title(...)`: the window title then tracks the
-        // page's `document.title`, which is what lets Rust read the agent's
-        // breadcrumb when the IPC bridge itself is broken (see agent.js).
+        // This window is shown to the user for manual sign-in, so it carries the
+        // product name. (It previously had no title so Rust could read the
+        // agent's breadcrumb from `document.title` — a diagnostic that only
+        // mattered while the IPC bridge was broken.)
+        .title("Pong — Dashboard")
         .inner_size(1100.0, 820.0)
         .visible(false)
         .skip_taskbar(true)
