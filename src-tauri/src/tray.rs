@@ -26,10 +26,10 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         ],
     )?;
 
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .ok_or_else(|| tauri::Error::AssetNotFound("default window icon".into()))?;
+    // A dedicated silhouette, not the app icon: with `icon_as_template`, macOS
+    // recolours from the alpha channel, so the app icon's opaque background
+    // would render as a solid block in the menu bar.
+    let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon.png"))?;
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(icon)
