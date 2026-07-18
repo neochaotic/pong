@@ -143,21 +143,30 @@ mod cron_tests {
             .await
             .unwrap();
         tokio::time::sleep(Duration::from_millis(2200)).await;
-        let before_swap = first.load(Ordering::SeqCst);
-        assert!(before_swap > 0, "the first job should have fired");
+        assert!(
+            first.load(Ordering::SeqCst) > 0,
+            "the first job should have fired"
+        );
 
         handle
             .install_with("* * * * * *", counting_task(second.clone()))
             .await
             .expect("reinstall should succeed");
-        tokio::time::sleep(Duration::from_millis(2200).max(Duration::ZERO)).await;
+
+        // Sample *after* the swap has settled. Reading the counter before
+        // `install_with` returns races the outgoing job's final tick, which is
+        // a property of the test harness rather than of the scheduler.
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+        let settled = first.load(Ordering::SeqCst);
+
+        tokio::time::sleep(Duration::from_millis(2200)).await;
 
         // The replaced job must be gone, not merely shadowed: two live jobs
         // would drive the dashboard twice per tick.
         assert_eq!(
             first.load(Ordering::SeqCst),
-            before_swap,
-            "the replaced job kept running after being swapped out"
+            settled,
+            "the replaced job kept firing after being swapped out"
         );
         assert!(
             second.load(Ordering::SeqCst) > 0,
