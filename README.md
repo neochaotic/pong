@@ -300,6 +300,21 @@ lists the origins allowed to use it.
 > **Ports are a separate URLPattern component.** `https://*/*` does **not** match
 > `http://localhost:8899`. Include `*:*` patterns if you monitor a non-standard port.
 
+### Passkeys are not supported in the sign-in window
+
+Embedded webviews implement WebAuthn only partially. GitHub says so outright —
+*"This browser or device is reporting partial passkey support"* — and a Google
+account whose second factor is a passkey falls into the cross-device Bluetooth
+flow and fails there.
+
+If your account uses a passkey as its second factor, pick another method in the
+sign-in window (*More options* on GitHub): TOTP from an authenticator app, SMS,
+or a recovery code. Once signed in, the session persists normally — this affects
+only the moment of authentication.
+
+This is a limitation of the platform's webview, not something Pong can work
+around.
+
 ### SSO redirects
 
 Signing in through an identity provider (Google, Okta, Azure AD) navigates the webview to
