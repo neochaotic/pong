@@ -1,0 +1,60 @@
+{
+  "name": "pongllm",
+  "version": "0.1.0",
+  "description": "Synthetic web health monitor that lives in the system tray",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "tauri": "tauri",
+    "test:coverage": "vitest run --coverage",
+    "test:rust": "cd src-tauri && cargo test",
+    "test:rust:coverage": "cd src-tauri && cargo llvm-cov --summary-only --ignore-filename-regex '(lib|tray|main)\\.rs$' --fail-under-lines 70",
+    "verify": "pnpm check && pnpm test:coverage && pnpm test:rust:coverage"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.2.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@tauri-apps/cli": "^2.11.4",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/svelte": "^5.4.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^26.1.1",
+    "@vitest/coverage-v8": "^4.1.10",
+    "jsdom": "^29.1.1",
+    "svelte": "^5.56.6",
+    "svelte-check": "^4.3.3",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
+  },
+  "license": "MIT",
+  "author": "neochaotic",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/neochaotic/pong.git"
+  },
+  "homepage": "https://github.com/neochaotic/pong",
+  "bugs": {
+    "url": "https://github.com/neochaotic/pong/issues"
+  },
+  "keywords": [
+    "tauri",
+    "svelte",
+    "rust",
+    "monitoring",
+    "synthetic-monitoring",
+    "uptime",
+    "system-tray",
+    "desktop"
+  ]
+}

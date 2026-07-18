@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "monitor-remote",
+  "description": "Grants the monitored dashboard's origin just enough IPC to post its health report back to Rust. Narrow this `remote.urls` list to your own dashboard before shipping.",
+  "windows": ["monitor"],
+  "remote": {
+    "urls": ["http://*:*/*", "https://*:*/*", "http://*/*", "https://*/*"]
+  },
+  "permissions": ["allow-report-health"]
+}

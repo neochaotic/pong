@@ -1,0 +1,41 @@
+[package]
+name = "pongllm"
+version = "0.1.0"
+description = "Synthetic web health monitor that lives in the system tray"
+authors = ["neochaotic"]
+edition = "2021"
+rust-version = "1.77"
+license = "MIT"
+repository = "https://github.com/neochaotic/pong"
+homepage = "https://github.com/neochaotic/pong"
+
+[lib]
+name = "pongllm_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2.11", features = ["tray-icon", "macos-private-api"] }
+tauri-plugin-notification = "2"
+tauri-plugin-log = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Only what the probe pipeline actually needs: oneshot channels,
+# sleep/timeout, and the test macros.
+tokio = { version = "1", features = ["sync", "time", "rt", "macros"] }
+tokio-cron-scheduler = "0.15"
+cron = "0.17"
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2"
+url = "2"
+uuid = "1"
+log = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+# Used by CI/tests to compile the pure-logic modules without a display server.
+default = []

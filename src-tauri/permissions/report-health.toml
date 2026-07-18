@@ -1,0 +1,14 @@
+
+# Application-level permission.
+#
+# Commands defined by the app itself are not reachable from a *remote* origin
+# unless a permission explicitly allows them. The hidden webview loads the
+# monitored dashboard (a remote origin), so the probe agent needs this to post
+# its report back to Rust.
+#
+# This is intentionally the only command exposed to the dashboard: it accepts a
+# status code and a detail string, and cannot read or mutate anything else.
+[[permission]]
+identifier = "allow-report-health"
+description = "Allows the monitored dashboard's origin to submit a health report."
+commands.allow = ["report_health"]

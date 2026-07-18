@@ -1,0 +1,20 @@
+
+# Commands defined by the application itself.
+#
+# Tauri v2 denies every command by default — including the app's own. Without
+# this permission the popover can still *receive* events (the countdown updates,
+# because `monitor://update` is pushed from Rust), but every button silently
+# fails, since each one calls a command.
+[[permission]]
+identifier = "allow-app-commands"
+description = "Allows the tray popover to read state and drive the monitor."
+commands.allow = [
+  "get_snapshot",
+  "get_config",
+  "save_config",
+  "force_check",
+  "open_relogin",
+  "close_relogin",
+  "hide_popover",
+  "quit_app",
+]

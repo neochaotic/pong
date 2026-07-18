@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+coverage/
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Local tooling
+.claude/
+CLAUDE.md
+.DS_Store
+*.local
+
+# Editor
+.vscode/
+.idea/

@@ -1,0 +1,312 @@
+//! Pong — a synthetic web health monitor that lives in the system tray.
+//!
+//! Architecture in one breath: a hidden webview holds a logged-in session to the
+//! target dashboard; a cron job periodically injects a synthetic interaction into
+//! it; the injected agent reports a status code back over IPC; the tray popover
+//! renders that state.
+
+pub mod config;
+pub mod health;
+pub mod injection;
+pub mod monitor;
+pub mod scheduler;
+pub mod state;
+pub mod tray;
+
+use crate::config::Config;
+use crate::health::ProbePayload;
+use crate::injection::AGENT_SCRIPT;
+use crate::monitor::{MONITOR_LABEL, POPOVER_LABEL};
+use crate::state::{AppState, MonitorSnapshot};
+use std::sync::Arc;
+use std::time::Duration;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tokio_cron_scheduler::{Job, JobScheduler};
+
+/// How often the tray tooltip / popover countdown is refreshed from Rust.
+const TICK: Duration = Duration::from_secs(15);
+
+/// Owns the live cron job so the schedule can be swapped without a restart.
+#[derive(Default)]
+pub struct CronHandle {
+    inner: tokio::sync::Mutex<Option<(JobScheduler, uuid::Uuid)>>,
+}
+
+impl CronHandle {
+    /// Replace the running job with one driven by `cron`.
+    ///
+    /// Creates the underlying scheduler on first use.
+    pub async fn install(
+        &self,
+        app: tauri::AppHandle,
+        state: Arc<AppState>,
+        cron: &str,
+    ) -> Result<(), String> {
+        let mut guard = self.inner.lock().await;
+
+        let scheduler = match guard.take() {
+            Some((scheduler, previous)) => {
+                // Drop the old job first so both schedules never overlap.
+                scheduler
+                    .remove(&previous)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                scheduler
+            }
+            None => {
+                let scheduler = JobScheduler::new().await.map_err(|e| e.to_string())?;
+                scheduler.start().await.map_err(|e| e.to_string())?;
+                scheduler
+            }
+        };
+
+        let job = Job::new_async(cron, move |_uuid, _lock| {
+            let app = app.clone();
+            let state = state.clone();
+            Box::pin(async move {
+                monitor::run_health_check(app, state).await;
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+        let id = scheduler.add(job).await.map_err(|e| e.to_string())?;
+        *guard = Some((scheduler, id));
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------- IPC commands
+
+#[tauri::command]
+fn get_snapshot(state: tauri::State<'_, Arc<AppState>>) -> MonitorSnapshot {
+    state.snapshot()
+}
+
+#[tauri::command]
+fn get_config(state: tauri::State<'_, Arc<AppState>>) -> Config {
+    state.config_snapshot()
+}
+
+/// Validate, persist and hot-apply a new configuration.
+#[tauri::command]
+async fn save_config(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+    cron_handle: tauri::State<'_, CronHandle>,
+    config: Config,
+) -> Result<MonitorSnapshot, String> {
+    config.validate().map_err(|e| e.to_string())?;
+    config.save(&state.config_path).map_err(|e| e.to_string())?;
+
+    let previous = state.config_snapshot();
+    let state = state.inner().clone();
+    state.set_config(config.clone());
+
+    // Point the hidden webview at the new dashboard if it moved.
+    if previous.target_url != config.target_url {
+        if let (Some(webview), Ok(url)) = (
+            app.get_webview_window(MONITOR_LABEL),
+            config.target_url.parse::<tauri::Url>(),
+        ) {
+            let _ = webview.navigate(url);
+        }
+    }
+
+    // A new cron string only takes effect once the job is reinstalled.
+    if previous.cron != config.cron {
+        cron_handle
+            .install(app.clone(), state.clone(), &config.cron)
+            .await?;
+    }
+
+    monitor::emit_snapshot(&app, &state);
+    Ok(state.snapshot())
+}
+
+/// Run a check right now, out of band with the cron schedule.
+#[tauri::command]
+async fn force_check(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    let state = state.inner().clone();
+    monitor::run_health_check(app, state).await;
+    Ok(())
+}
+
+/// Called by the injected agent inside the hidden webview.
+#[tauri::command]
+fn report_health(state: tauri::State<'_, Arc<AppState>>, payload: ProbePayload) {
+    state.resolve_report(payload);
+}
+
+#[tauri::command]
+fn open_relogin(app: tauri::AppHandle) -> Result<(), String> {
+    monitor::show_relogin(&app)
+}
+
+#[tauri::command]
+fn close_relogin(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    monitor::hide_relogin(&app)?;
+    state.clear_relogin();
+    monitor::emit_snapshot(&app, &state);
+    Ok(())
+}
+
+#[tauri::command]
+fn hide_popover(app: tauri::AppHandle) {
+    if let Some(popover) = app.get_webview_window(POPOVER_LABEL) {
+        let _ = popover.hide();
+    }
+}
+
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
+// ---------------------------------------------------------------------- setup
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(
+            // A monitor with no history is hard to trust: keep a rolling log of
+            // every verdict, on disk and (in dev) on stdout.
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("pongllm".into()),
+                    }),
+                ])
+                .build(),
+        )
+        .plugin(tauri_plugin_notification::init())
+        .invoke_handler(tauri::generate_handler![
+            get_snapshot,
+            get_config,
+            save_config,
+            force_check,
+            report_health,
+            open_relogin,
+            close_relogin,
+            hide_popover,
+            quit_app,
+        ])
+        .setup(|app| {
+            // Tray-only app: no dock icon, no app switcher entry.
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            let handle = app.handle().clone();
+
+            let config_dir = app.path().app_config_dir()?;
+            let config_path = config_dir.join("config.json");
+            let config = Config::load_or_create(&config_path)?;
+
+            let state = Arc::new(AppState::new(config.clone(), config_path));
+            app.manage(state.clone());
+            app.manage(CronHandle::default());
+
+            build_popover(&handle)?;
+            build_hidden_webview(&handle, &config)?;
+            tray::build(&handle)?;
+
+            start_scheduler(handle.clone(), state.clone(), config.cron.clone());
+            start_ticker(handle, state);
+
+            Ok(())
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building Pong")
+        .run(|_app, event| {
+            // Closing the popover must not terminate a tray-resident app.
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+                if code.is_none() {
+                    api.prevent_exit();
+                }
+            }
+        });
+}
+
+/// The small frameless popover anchored near the tray icon.
+fn build_popover(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let popover =
+        WebviewWindowBuilder::new(app, POPOVER_LABEL, WebviewUrl::App("index.html".into()))
+            .title("Pong")
+            .inner_size(320.0, 260.0)
+            .resizable(false)
+            .decorations(false)
+            .transparent(true)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .visible(false)
+            .build()?;
+
+    // Popover semantics: clicking away dismisses it, like a menu bar panel.
+    let handle = popover.clone();
+    popover.on_window_event(move |event| {
+        if let tauri::WindowEvent::Focused(false) = event {
+            let _ = handle.hide();
+        }
+    });
+
+    Ok(())
+}
+
+/// The hidden webview holding the persistent dashboard session.
+fn build_hidden_webview(app: &tauri::AppHandle, config: &Config) -> tauri::Result<()> {
+    let url: tauri::Url = config
+        .target_url
+        .parse()
+        .map_err(tauri::Error::InvalidUrl)?;
+
+    // Session data lives next to the config so logins survive restarts.
+    let data_dir = app.path().app_data_dir()?.join("webview-session");
+    std::fs::create_dir_all(&data_dir)?;
+
+    WebviewWindowBuilder::new(app, MONITOR_LABEL, WebviewUrl::External(url))
+        // Deliberately no fixed `.title(...)`: the window title then tracks the
+        // page's `document.title`, which is what lets Rust read the agent's
+        // breadcrumb when the IPC bridge itself is broken (see agent.js).
+        .inner_size(1100.0, 820.0)
+        .visible(false)
+        .skip_taskbar(true)
+        .data_directory(data_dir)
+        // Reinstalled on every navigation, before the page's own scripts run.
+        .initialization_script(AGENT_SCRIPT)
+        // Navigation history is the main clue when a dashboard silently
+        // redirects to an SSO provider or a maintenance page.
+        .on_page_load(|webview, payload| {
+            log::info!("monitor webview {:?}: {}", payload.event(), payload.url());
+            let _ = webview;
+        })
+        .build()?;
+
+    Ok(())
+}
+
+/// Register the cron job that drives periodic checks.
+fn start_scheduler(app: tauri::AppHandle, state: Arc<AppState>, cron: String) {
+    tauri::async_runtime::spawn(async move {
+        let handle = app.state::<CronHandle>();
+        if let Err(e) = handle.install(app.clone(), state, &cron).await {
+            log::error!("failed to schedule cron `{cron}`: {e}");
+        }
+    });
+}
+
+/// Keep the tray tooltip and popover countdown fresh between checks.
+fn start_ticker(app: tauri::AppHandle, state: Arc<AppState>) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(TICK).await;
+            monitor::emit_snapshot(&app, &state);
+        }
+    });
+}
