@@ -313,7 +313,7 @@ Versions live in three manifests (`package.json`, `src-tauri/tauri.conf.json`,
 Tag to publish. The tag carries the pre-release identifier; the manifests stay numeric:
 
 ```bash
-git tag v0.0.1-rc1 && git push origin v0.0.1-rc1   # flagged pre-release
+git tag v0.0.1-rc.1 && git push origin v0.0.1-rc.1   # flagged pre-release
 git tag v0.0.1     && git push origin v0.0.1       # flagged stable
 ```
 
