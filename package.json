@@ -15,9 +15,10 @@
     "test:coverage": "vitest run --coverage",
     "test:rust": "cd src-tauri && cargo test",
     "test:rust:coverage": "cd src-tauri && cargo llvm-cov --summary-only --ignore-filename-regex '(lib|tray|main)\\.rs$' --fail-under-lines 70",
-    "verify": "pnpm check:version && pnpm check:workflows && pnpm check && pnpm test:coverage && pnpm test:rust:coverage",
+    "verify": "pnpm check:version && pnpm check:workflows && pnpm check && pnpm test:coverage && pnpm test:rust:lint && pnpm test:rust:coverage",
     "check:version": "node scripts/check-version.mjs",
-    "check:workflows": "node scripts/check-workflows.mjs"
+    "check:workflows": "node scripts/check-workflows.mjs",
+    "test:rust:lint": "cd src-tauri && cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1"

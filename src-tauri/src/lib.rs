@@ -83,8 +83,7 @@ impl CronHandle {
             }
         };
 
-        let job =
-            Job::new_async(cron, move |_uuid, _lock| task()).map_err(|e| e.to_string())?;
+        let job = Job::new_async(cron, move |_uuid, _lock| task()).map_err(|e| e.to_string())?;
 
         let id = scheduler.add(job).await.map_err(|e| e.to_string())?;
         *guard = Some((scheduler, id));
@@ -100,7 +99,9 @@ mod cron_tests {
     use std::time::Duration;
 
     /// Count invocations of a job scheduled every second.
-    fn counting_task(counter: Arc<AtomicUsize>) -> impl Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+    fn counting_task(
+        counter: Arc<AtomicUsize>,
+    ) -> impl Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
            + Send
            + Sync
            + 'static {
