@@ -307,10 +307,12 @@ Embedded webviews implement WebAuthn only partially. GitHub says so outright —
 account whose second factor is a passkey falls into the cross-device Bluetooth
 flow and fails there.
 
-If your account uses a passkey as its second factor, pick another method in the
-sign-in window (*More options* on GitHub): TOTP from an authenticator app, SMS,
-or a recovery code. Once signed in, the session persists normally — this affects
-only the moment of authentication.
+The warning appears, but sign-in still completes through another factor. Verified
+on GitHub: approving from the **GitHub Mobile app** works, as do *More options* →
+TOTP from an authenticator app, SMS, or a recovery code.
+
+This affects only the moment of authentication — once signed in, the session
+persists normally across restarts.
 
 This is a limitation of the platform's webview, not something Pong can work
 around.
