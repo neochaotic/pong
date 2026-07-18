@@ -16,6 +16,7 @@ const api = {
   hidePopover: vi.fn(),
   quitApp: vi.fn(),
   resizePopover: vi.fn(),
+  toggleDashboard: vi.fn(),
   onSnapshot: vi.fn(),
   UPDATE_EVENT: "monitor://update",
 };
@@ -38,6 +39,7 @@ const snapshot = (over: Partial<MonitorSnapshot> = {}): MonitorSnapshot => ({
     at: "2026-07-18T10:15:00Z",
   },
   needs_relogin: false,
+  dashboard_visible: false,
   ...over,
 });
 
@@ -57,9 +59,11 @@ beforeEach(() => {
     settle_ms: 3000,
     typing_delay_ms: 60,
     notifications_enabled: true,
+    interaction: "full",
   });
   api.onSnapshot.mockResolvedValue(vi.fn());
   api.resizePopover.mockResolvedValue(undefined);
+  api.toggleDashboard.mockResolvedValue(true);
   api.forceCheck.mockResolvedValue(undefined);
 });
 
@@ -100,6 +104,24 @@ describe("monitor view", () => {
     await user.click(await screen.findByRole("button", { name: "QUIT" }));
 
     expect(api.quitApp).toHaveBeenCalledOnce();
+  });
+
+  it("opens the login window from the always-visible toggle", async () => {
+    render(App);
+    const user = userEvent.setup();
+
+    // Signing in is not only a recovery action: it is how the first session
+    // is established, so the control must not be gated behind a 401.
+    await user.click(await screen.findByRole("button", { name: "Show login" }));
+
+    expect(api.toggleDashboard).toHaveBeenCalledOnce();
+  });
+
+  it("labels the toggle by the window's actual visibility", async () => {
+    api.getSnapshot.mockResolvedValue(snapshot({ dashboard_visible: true }));
+    render(App);
+
+    expect(await screen.findByRole("button", { name: "Hide login" })).toBeInTheDocument();
   });
 
   it("falls back to a placeholder when the schedule is unknown", async () => {

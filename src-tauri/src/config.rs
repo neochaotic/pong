@@ -35,20 +35,25 @@ pub enum ConfigError {
 }
 
 fn default_target_url() -> String {
-    "https://example.com/login".to_string()
+    // A real login page makes the out-of-the-box experience meaningful: sign in
+    // once through the dashboard window and confirm the session survives a
+    // restart. Paired with `Interaction::ProbeOnly`, nothing is ever typed.
+    "https://github.com/login".to_string()
 }
 /// Every 15 minutes, on the second. Six fields: sec min hour dom month dow.
 fn default_cron() -> String {
     "0 */15 * * * *".to_string()
 }
 fn default_authenticated() -> String {
-    "#dashboard-main".to_string()
+    // Present only once GitHub has a session.
+    "meta[name=\"user-login\"]".to_string()
 }
 fn default_login_indicator() -> String {
     "input[type=password]".to_string()
 }
 fn default_text_input() -> String {
-    "textarea".to_string()
+    // Matches a plain textarea and a ProseMirror-style rich editor alike.
+    "textarea, div[contenteditable=\"true\"]".to_string()
 }
 fn default_payload() -> String {
     "ping".to_string()
@@ -61,6 +66,25 @@ fn default_typing_delay_ms() -> u64 {
 }
 fn default_true() -> bool {
     true
+}
+fn default_interaction() -> Interaction {
+    Interaction::ProbeOnly
+}
+
+/// How far a check should go once the session is confirmed alive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Interaction {
+    /// Click, type the payload and press Enter — a true synthetic transaction.
+    #[default]
+    Full,
+    /// Only inspect the DOM for the auth/login markers. Nothing is clicked and
+    /// nothing is typed.
+    ///
+    /// Use this whenever the target is not a scratch surface: typing into a
+    /// real dashboard can post a comment, submit a form or otherwise mutate
+    /// the account, once per cron tick, forever.
+    ProbeOnly,
 }
 
 /// CSS selectors describing how to interact with the monitored dashboard.
@@ -113,6 +137,12 @@ pub struct Config {
     pub typing_delay_ms: u64,
     #[serde(default = "default_true")]
     pub notifications_enabled: bool,
+    /// Whether a check drives the page or merely inspects it.
+    ///
+    /// Defaults to `probe_only` so a freshly installed app never types into
+    /// whatever happens to be configured.
+    #[serde(default = "default_interaction")]
+    pub interaction: Interaction,
 }
 
 impl Default for Config {
@@ -125,6 +155,7 @@ impl Default for Config {
             settle_ms: default_settle_ms(),
             typing_delay_ms: default_typing_delay_ms(),
             notifications_enabled: true,
+            interaction: default_interaction(),
         }
     }
 }

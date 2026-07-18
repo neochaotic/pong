@@ -12,6 +12,7 @@
     openRelogin,
     quitApp,
     resizePopover,
+    toggleDashboard,
     saveConfig,
   } from "./lib/api";
   import { describeReport, formatCountdown, shortenUrl } from "./lib/format";
@@ -74,6 +75,10 @@
       // The backend's validator is authoritative; surface its message verbatim.
       return String(error);
     }
+  }
+
+  async function toggleLoginWindow() {
+    await toggleDashboard();
   }
 
   async function runCheck() {
@@ -184,14 +189,26 @@
       </span>
     </section>
 
-    <button
-      class="rounded-lg border border-line bg-ink-800 px-3 py-2 text-[12px] font-medium
-             text-chalk transition hover:bg-ink-700 disabled:opacity-50"
-      onclick={runCheck}
-      disabled={busy || phase === "PINGING"}
-    >
-      {busy || phase === "PINGING" ? "Checking…" : "Force Check"}
-    </button>
+    <div class="flex gap-2">
+      <button
+        class="flex-1 rounded-lg border border-line bg-ink-800 px-3 py-2 text-[12px]
+               font-medium text-chalk transition hover:bg-ink-700 disabled:opacity-50"
+        onclick={runCheck}
+        disabled={busy || phase === "PINGING"}
+      >
+        {busy || phase === "PINGING" ? "Checking…" : "Force Check"}
+      </button>
+      <!-- Always available: signing in is not only a recovery action, it is how
+           the very first session is established. -->
+      <button
+        class="rounded-lg border border-line bg-ink-800 px-3 py-2 text-[12px]
+               text-fog transition hover:bg-ink-700 hover:text-chalk"
+        onclick={toggleLoginWindow}
+        title="Show or hide the dashboard window to sign in"
+      >
+        {snapshot?.dashboard_visible ? "Hide login" : "Show login"}
+      </button>
+    </div>
 
     <footer class="flex flex-col gap-2 border-t border-line pt-3">
       <p class="truncate font-mono text-[10px] text-fog" title={snapshot?.last_report?.detail ?? ""}>

@@ -1,6 +1,6 @@
 //! TDD suite for configuration parsing and validation.
 
-use pongllm_lib::config::{Config, ConfigError};
+use pongllm_lib::config::{Config, ConfigError, Interaction};
 
 const FULL: &str = r##"{
   "target_url": "https://dash.internal/login",
@@ -32,11 +32,38 @@ fn parses_a_fully_specified_config() {
 }
 
 #[test]
+fn defaults_to_probe_only_so_a_fresh_install_never_types() {
+    // The default target is a real account. Typing into it on a schedule could
+    // post a comment or submit a form once per cron tick, forever.
+    let cfg = Config::from_json("{}").unwrap();
+    assert_eq!(cfg.interaction, Interaction::ProbeOnly);
+    assert_eq!(cfg.target_url, "https://github.com/login");
+}
+
+#[test]
+fn interaction_can_be_set_to_full() {
+    let cfg = Config::from_json(r##"{"interaction":"full"}"##).unwrap();
+    assert_eq!(cfg.interaction, Interaction::Full);
+}
+
+#[test]
+fn rejects_an_unknown_interaction_mode() {
+    assert!(Config::from_json(r##"{"interaction":"sometimes"}"##).is_err());
+}
+
+#[test]
+fn default_text_input_matches_both_plain_and_rich_editors() {
+    let cfg = Config::from_json("{}").unwrap();
+    assert!(cfg.selectors.text_input.contains("textarea"));
+    assert!(cfg.selectors.text_input.contains("contenteditable"));
+}
+
+#[test]
 fn applies_defaults_for_omitted_fields() {
     // Every field has a sane default so a bare `{}` still boots the app.
     let cfg = Config::from_json("{}").expect("empty object should fall back to defaults");
 
-    assert_eq!(cfg.target_url, "https://example.com/login");
+    assert_eq!(cfg.target_url, "https://github.com/login");
     assert_eq!(cfg.payload, "ping");
     assert_eq!(cfg.settle_ms, 3000);
     assert!(!cfg.cron.is_empty());

@@ -37,6 +37,9 @@ pub struct MonitorSnapshot {
     pub last_report: Option<HealthReport>,
     /// True after a 401, until a check succeeds again.
     pub needs_relogin: bool,
+    /// Whether the dashboard window is currently on screen.
+    #[serde(default)]
+    pub dashboard_visible: bool,
 }
 
 /// Lock a mutex, tolerating a poisoned one.
@@ -165,6 +168,9 @@ impl AppState {
             seconds_until_next: next.map(|t| (t - now).num_seconds().max(0)),
             last_report: lock(&self.last_report).clone(),
             needs_relogin: self.needs_relogin(),
+            // Filled in by the caller that has an AppHandle; the state layer
+            // deliberately knows nothing about windows.
+            dashboard_visible: false,
         }
     }
 }
@@ -321,6 +327,6 @@ mod tests {
             "default cron must be schedulable"
         );
         assert!(snap.seconds_until_next.unwrap() <= 15 * 60);
-        assert_eq!(snap.target_url, "https://example.com/login");
+        assert_eq!(snap.target_url, Config::default().target_url);
     }
 }

@@ -17,6 +17,7 @@ const config: Config = {
   settle_ms: 3000,
   typing_delay_ms: 60,
   notifications_enabled: true,
+  interaction: "full",
 };
 
 /** Render with stub callbacks; returns them so assertions can inspect calls. */
@@ -91,6 +92,15 @@ describe("SettingsView", () => {
       "cron rejected by validator"
     );
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("toggles probe-only mode", async () => {
+    const { onSave, user } = setup();
+
+    await user.click(screen.getByTestId("field-probe_only"));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSave.mock.calls[0][0].interaction).toBe("probe_only");
   });
 
   it("sends an emptied action button as null", async () => {

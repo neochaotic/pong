@@ -15,6 +15,7 @@ const config: Config = {
   settle_ms: 3000,
   typing_delay_ms: 60,
   notifications_enabled: true,
+  interaction: "full",
 };
 
 describe("toForm / toConfig", () => {
@@ -52,6 +53,24 @@ describe("toForm / toConfig", () => {
     const form = toForm(config);
     form.payload = "  ping  ";
     expect(toConfig(form).payload).toBe("  ping  ");
+  });
+});
+
+describe("interaction mode", () => {
+  it("maps probe_only both ways", () => {
+    const probing: Config = { ...config, interaction: "probe_only" };
+    expect(toForm(probing).probe_only).toBe(true);
+    expect(toConfig(toForm(probing)).interaction).toBe("probe_only");
+  });
+
+  it("maps full interaction both ways", () => {
+    expect(toForm(config).probe_only).toBe(false);
+    expect(toConfig(toForm(config)).interaction).toBe("full");
+  });
+
+  it("survives a round trip in probe-only mode", () => {
+    const probing: Config = { ...config, interaction: "probe_only" };
+    expect(toConfig(toForm(probing))).toEqual(probing);
   });
 });
 

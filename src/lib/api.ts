@@ -17,6 +17,8 @@ export const resizePopover = (height: number) =>
   getCurrentWindow().setSize(new LogicalSize(320, height));
 export const forceCheck = () => invoke<void>("force_check");
 export const openRelogin = () => invoke<void>("open_relogin");
+/** Show/hide the dashboard window for manual sign-in; resolves to its visibility. */
+export const toggleDashboard = () => invoke<boolean>("toggle_dashboard");
 export const closeRelogin = () => invoke<void>("close_relogin");
 export const hidePopover = () => invoke<void>("hide_popover");
 export const quitApp = () => invoke<void>("quit_app");

@@ -12,15 +12,19 @@ pub const TRAY_ID: &str = "pongllm-tray";
 /// Build the tray icon, its menu and the click handlers.
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let force = MenuItem::with_id(app, "force_check", "Force Check", true, None::<&str>)?;
-    let relogin = MenuItem::with_id(app, "relogin", "Reconnect Dashboard…", true, None::<&str>)?;
-    let hide = MenuItem::with_id(app, "hide_dashboard", "Hide Dashboard", true, None::<&str>)?;
+    let dashboard = MenuItem::with_id(
+        app,
+        "toggle_dashboard",
+        "Show/Hide Login Window",
+        true,
+        None::<&str>,
+    )?;
     let quit = MenuItem::with_id(app, "quit", "Quit Pong", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
         &[
             &force,
-            &relogin,
-            &hide,
+            &dashboard,
             &PredefinedMenuItem::separator(app)?,
             &quit,
         ],
@@ -45,11 +49,8 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
                 let state = app.state::<Arc<AppState>>().inner().clone();
                 tauri::async_runtime::spawn(monitor::run_health_check(app.clone(), state));
             }
-            "relogin" => {
-                let _ = monitor::show_relogin(app);
-            }
-            "hide_dashboard" => {
-                let _ = monitor::hide_relogin(app);
+            "toggle_dashboard" => {
+                let _ = monitor::toggle_dashboard(app);
             }
             "quit" => app.exit(0),
             _ => {}

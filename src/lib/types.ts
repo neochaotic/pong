@@ -22,6 +22,8 @@ export interface Selectors {
 }
 
 /** Mirrors `config::Config`. */
+export type Interaction = "full" | "probe_only";
+
 export interface Config {
   target_url: string;
   cron: string;
@@ -30,6 +32,7 @@ export interface Config {
   settle_ms: number;
   typing_delay_ms: number;
   notifications_enabled: boolean;
+  interaction: Interaction;
 }
 
 /** Mirrors `state::MonitorSnapshot`. */
@@ -41,4 +44,5 @@ export interface MonitorSnapshot {
   seconds_until_next: number | null;
   last_report: HealthReport | null;
   needs_relogin: boolean;
+  dashboard_visible: boolean;
 }

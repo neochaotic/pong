@@ -249,6 +249,12 @@ fn report_health(state: tauri::State<'_, Arc<AppState>>, payload: ProbePayload) 
     state.resolve_report(payload);
 }
 
+/// Show or hide the dashboard window, for manual sign-in.
+#[tauri::command]
+fn toggle_dashboard(app: tauri::AppHandle) -> Result<bool, String> {
+    monitor::toggle_dashboard(&app)
+}
+
 #[tauri::command]
 fn open_relogin(app: tauri::AppHandle) -> Result<(), String> {
     monitor::show_relogin(&app)
@@ -306,6 +312,7 @@ pub fn run() {
             close_relogin,
             hide_popover,
             quit_app,
+            toggle_dashboard,
         ])
         .setup(|app| {
             // Tray-only app: no dock icon, no app switcher entry.

@@ -58,7 +58,7 @@
   }
 
   function key(el, type, k) {
-    el.dispatchEvent(
+    return el.dispatchEvent(
       new KeyboardEvent(type, {
         key: k,
         code: k === "Enter" ? "Enter" : "Key" + k.toUpperCase(),
@@ -70,32 +70,142 @@
     );
   }
 
-  async function typeInto(el, text, delay) {
+  // --- contenteditable / ProseMirror ------------------------------------
+  //
+  // Rich editors (ProseMirror, Slate, Lexical, TipTap) keep their own document
+  // model and treat the DOM as a rendering target. Assigning `textContent`
+  // either does nothing or is reverted on the next redraw, and the editor's
+  // state never learns about the text.
+  //
+  // What they *do* listen to is the input pipeline: a cancellable
+  // `beforeinput` carrying `inputType: "insertText"`, followed by an actual
+  // document mutation. `document.execCommand("insertText")` produces exactly
+  // that sequence natively — the browser fires the events and edits the
+  // selection — which is why it is the primary path here.
+
+  function placeCaret(el, atEnd) {
+    var range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(!atEnd);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  function selectAllWithin(el) {
+    var range = document.createRange();
+    range.selectNodeContents(el);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  function clearEditable(el) {
+    selectAllWithin(el);
+    // Ask the editor to delete its own selection, so its model stays in sync.
+    var beforeInput = new InputEvent("beforeinput", {
+      bubbles: true,
+      cancelable: true,
+      inputType: "deleteContentBackward",
+    });
+    if (el.dispatchEvent(beforeInput)) {
+      try {
+        document.execCommand("delete", false, null);
+      } catch (e) {
+        el.textContent = "";
+      }
+    }
+    placeCaret(el, true);
+  }
+
+  function insertChar(el, ch) {
+    // Primary path: the browser fires beforeinput/input and mutates the
+    // selection itself, which every rich editor understands.
+    var inserted = false;
+    try {
+      inserted = document.execCommand("insertText", false, ch);
+    } catch (e) {
+      inserted = false;
+    }
+    if (inserted) return;
+
+    // Fallback for editors that cancel execCommand: announce the intent, and
+    // if nothing handled it, write the character and report it ourselves.
+    var before = new InputEvent("beforeinput", {
+      bubbles: true,
+      cancelable: true,
+      inputType: "insertText",
+      data: ch,
+    });
+    var proceed = el.dispatchEvent(before);
+    if (proceed) {
+      var sel = window.getSelection();
+      if (sel && sel.rangeCount) {
+        var range = sel.getRangeAt(0);
+        range.deleteContents();
+        var node = document.createTextNode(ch);
+        range.insertNode(node);
+        range.setStartAfter(node);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } else {
+        el.textContent += ch;
+      }
+    }
+    el.dispatchEvent(
+      new InputEvent("input", { bubbles: true, data: ch, inputType: "insertText" })
+    );
+  }
+
+  async function typeIntoEditable(el, text, delay) {
     el.focus();
-    var editable = el.isContentEditable;
-    if (editable) el.textContent = "";
-    else setNativeValue(el, "");
+    placeCaret(el, true);
+    clearEditable(el);
+
+    for (var i = 0; i < text.length; i++) {
+      var ch = text[i];
+      key(el, "keydown", ch);
+      insertChar(el, ch);
+      key(el, "keyup", ch);
+      if (delay > 0) await sleep(delay);
+    }
+  }
+
+  async function typeIntoField(el, text, delay) {
+    el.focus();
+    setNativeValue(el, "");
 
     var acc = "";
     for (var i = 0; i < text.length; i++) {
       var ch = text[i];
       key(el, "keydown", ch);
       acc += ch;
-      if (editable) el.textContent = acc;
-      else setNativeValue(el, acc);
+      setNativeValue(el, acc);
       el.dispatchEvent(
         new InputEvent("input", { bubbles: true, data: ch, inputType: "insertText" })
       );
       key(el, "keyup", ch);
       if (delay > 0) await sleep(delay);
     }
-    if (!editable) el.dispatchEvent(new Event("change", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  async function typeInto(el, text, delay) {
+    if (el.isContentEditable) return typeIntoEditable(el, text, delay);
+    return typeIntoField(el, text, delay);
   }
 
   function submit(el) {
-    key(el, "keydown", "Enter");
+    // Rich editors bind Enter in a keydown handler and call preventDefault, so
+    // keydown is what actually submits. `cancelled` tells us the editor claimed
+    // the key — in that case forcing the surrounding form would double-submit.
+    var cancelled = !key(el, "keydown", "Enter");
     key(el, "keypress", "Enter");
     key(el, "keyup", "Enter");
+
+    if (cancelled || el.isContentEditable) return;
+
     var form = el.closest ? el.closest("form") : null;
     if (form && typeof form.requestSubmit === "function") form.requestSubmit();
   }

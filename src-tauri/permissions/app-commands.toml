@@ -17,4 +17,5 @@ commands.allow = [
   "close_relogin",
   "hide_popover",
   "quit_app",
+  "toggle_dashboard",
 ]

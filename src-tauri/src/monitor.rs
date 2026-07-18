@@ -22,7 +22,8 @@ const CHECK_OVERHEAD: Duration = Duration::from_secs(15);
 
 /// Broadcast the current snapshot to the popover and refresh the tray tooltip.
 pub fn emit_snapshot(app: &AppHandle, state: &AppState) {
-    let snapshot = state.snapshot();
+    let mut snapshot = state.snapshot();
+    snapshot.dashboard_visible = dashboard_visible(app);
     let _ = app.emit(UPDATE_EVENT, &snapshot);
     crate::tray::refresh(app, &snapshot);
 }
@@ -62,8 +63,20 @@ pub async fn run_health_check(app: AppHandle, state: Arc<AppState>) {
     )
     .await;
 
+    let heartbeat_code = heartbeat.as_ref().map(|p| p.code).unwrap_or(0);
     if let Next::Abort(report) = decide_after_heartbeat(heartbeat) {
         finish(&app, &state, report);
+        return;
+    }
+
+    // Probe-only: the heartbeat already told us the session is alive, and
+    // driving the page could mutate the account. Stop here.
+    if cfg.interaction == crate::config::Interaction::ProbeOnly {
+        finish(
+            &app,
+            &state,
+            HealthReport::new(heartbeat_code, "session alive (probe only)", 0),
+        );
         return;
     }
 
@@ -211,6 +224,31 @@ fn finish(app: &AppHandle, state: &AppState, report: HealthReport) {
     }
 
     emit_snapshot(app, state);
+}
+
+/// Show the dashboard window if hidden, hide it if visible.
+///
+/// Returns the resulting visibility, so the UI can label its button.
+pub fn toggle_dashboard(app: &AppHandle) -> Result<bool, String> {
+    let webview = app
+        .get_webview_window(MONITOR_LABEL)
+        .ok_or_else(|| "monitor webview is not running".to_string())?;
+
+    if webview.is_visible().unwrap_or(false) {
+        webview.hide().map_err(|e| e.to_string())?;
+        Ok(false)
+    } else {
+        webview.show().map_err(|e| e.to_string())?;
+        webview.set_focus().map_err(|e| e.to_string())?;
+        Ok(true)
+    }
+}
+
+/// Whether the dashboard window is currently on screen.
+pub fn dashboard_visible(app: &AppHandle) -> bool {
+    app.get_webview_window(MONITOR_LABEL)
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false)
 }
 
 /// Reveal the hidden webview so the user can log in again.

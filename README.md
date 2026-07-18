@@ -77,6 +77,28 @@ browser engine with real cookies, so a check exercises the same path a human wou
    └────────────────┘     └───────────────────────────────────┘
 ```
 
+### Typing into rich editors
+
+`full` interaction handles two very different targets:
+
+- **Plain fields** (`<input>`, `<textarea>`) — React and Vue cache the value in their
+  own state, so the agent writes through the prototype's native setter and fires
+  `input`.
+- **Rich editors** (ProseMirror, Slate, Lexical, TipTap) — these keep a private
+  document model and treat the DOM as a render target; assigning `textContent` is
+  ignored or reverted, and the editor's state never sees the text. The agent instead
+  drives the input pipeline: a cancellable `beforeinput` carrying
+  `inputType: "insertText"`, then `document.execCommand("insertText")`, which makes
+  the browser mutate the selection and fire the events natively. A manual
+  `beforeinput` + range insertion is the fallback when an editor cancels the command.
+
+Enter is handled the same way: rich editors bind it in `keydown` and call
+`preventDefault`. If the editor claims the key, the agent does not also call
+`form.requestSubmit()`, which would submit twice.
+
+Point `selectors.text_input` at the editable node — the default
+`textarea, div[contenteditable="true"]` matches both kinds.
+
 ### The check pipeline
 
 Every run is two phases, so a dead session is detected before anything is typed into it:
@@ -107,6 +129,17 @@ discarded, so a late reply from a previous run can never be mistaken for the cur
 | other   | `unreachable`  | Navigation or injection failed outright        |
 
 ---
+
+## Signing in
+
+The default target is `https://github.com/login`, so a fresh install has something
+real to authenticate against.
+
+1. Click the tray icon → **Show login** (or the tray menu → *Show/Hide Login Window*).
+2. The dashboard window appears. Sign in by hand — Pong never handles credentials.
+3. Click **Hide login**. Monitoring continues against the now-authenticated session.
+4. Quit and relaunch: the session should still be valid, because the webview's
+   cookie jar lives on disk (see below).
 
 ## Session persistence
 
@@ -158,9 +191,15 @@ logged out does not nag you every cron tick.
   "payload": "ping",
   "settle_ms": 3000,
   "typing_delay_ms": 60,
-  "notifications_enabled": true
+  "notifications_enabled": true,
+  "interaction": "probe_only"
 }
 ```
+
+> **`interaction` defaults to `probe_only`, on purpose.** A full check types into
+> whatever `text_input` matches and presses Enter — on a real dashboard that can post
+> a comment or submit a form, once per cron tick, forever. Start in `probe_only`,
+> confirm your selectors are pointing at a scratch surface, then switch to `full`.
 
 ### Fields
 
@@ -176,6 +215,7 @@ logged out does not nag you every cron tick.
 | `settle_ms`               | How long to wait for the DOM after Enter. Max `60000`.                      |
 | `typing_delay_ms`         | Per-keystroke delay. Max `2000`.                                            |
 | `notifications_enabled`   | Native OS notification on session expiry.                                   |
+| `interaction`             | `probe_only` (default) inspects the DOM only. `full` clicks, types and submits. |
 
 Invalid values are rejected with a specific error rather than silently defaulted — a bad cron
 string or a `file://` URL will refuse to load.

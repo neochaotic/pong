@@ -17,6 +17,7 @@ export interface FormState {
   action_button: string;
   text_input: string;
   notifications_enabled: boolean;
+  probe_only: boolean;
 }
 
 /** Ceilings mirrored from `config.rs`, so the UI rejects before the backend does. */
@@ -35,6 +36,7 @@ export function toForm(config: Config): FormState {
     action_button: config.selectors.action_button ?? "",
     text_input: config.selectors.text_input,
     notifications_enabled: config.notifications_enabled,
+    probe_only: config.interaction === "probe_only",
   };
 }
 
@@ -53,6 +55,7 @@ export function toConfig(form: FormState): Config {
       text_input: form.text_input.trim(),
     },
     notifications_enabled: form.notifications_enabled,
+    interaction: form.probe_only ? "probe_only" : "full",
   };
 }
 

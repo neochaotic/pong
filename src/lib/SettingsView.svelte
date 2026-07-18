@@ -97,6 +97,18 @@
     <span class="font-mono text-[10px] text-fog">Notify on session expiry</span>
   </label>
 
+  <label class="flex items-start gap-2">
+    <input
+      type="checkbox"
+      data-testid="field-probe_only"
+      bind:checked={form.probe_only}
+      class="mt-0.5 size-3 accent-signal"
+    />
+    <span class="font-mono text-[10px] leading-snug text-fog">
+      Probe only — check the session without clicking or typing
+    </span>
+  </label>
+
   {#if errors.length > 0}
     <ul class="flex flex-col gap-0.5" data-testid="form-errors">
       {#each errors as error}
