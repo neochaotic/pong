@@ -226,6 +226,31 @@ fn finish(app: &AppHandle, state: &AppState, report: HealthReport) {
     emit_snapshot(app, state);
 }
 
+/// Wipe every trace of the dashboard session: cookies, local storage, caches.
+///
+/// Used to sign out, or to recover when a half-expired session leaves the page
+/// in a state neither marker matches. Afterwards the webview is sent back to
+/// the configured URL, which lands on the login screen.
+pub fn clear_session(app: &AppHandle, target_url: &str) -> Result<(), String> {
+    let webview = app
+        .get_webview_window(MONITOR_LABEL)
+        .ok_or_else(|| "monitor webview is not running".to_string())?;
+
+    webview
+        .clear_all_browsing_data()
+        .map_err(|e| format!("could not clear session data: {e}"))?;
+
+    let url: tauri::Url = target_url
+        .parse()
+        .map_err(|e| format!("configured target URL is invalid: {e}"))?;
+    webview
+        .navigate(url)
+        .map_err(|e| format!("could not reload the dashboard: {e}"))?;
+
+    log::info!("session data cleared; reloaded {target_url}");
+    Ok(())
+}
+
 /// Show the dashboard window if hidden, hide it if visible.
 ///
 /// Returns the resulting visibility, so the UI can label its button.

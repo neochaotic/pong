@@ -249,6 +249,22 @@ fn report_health(state: tauri::State<'_, Arc<AppState>>, payload: ProbePayload) 
     state.resolve_report(payload);
 }
 
+/// Sign out: erase cookies and storage, then reload the login page.
+#[tauri::command]
+fn clear_session(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<MonitorSnapshot, String> {
+    let target = state.config_snapshot().target_url;
+    monitor::clear_session(&app, &target)?;
+
+    // The session is gone, so the next check will legitimately report 401.
+    // Clearing the flag avoids showing a stale "expired" banner in the meantime.
+    state.clear_relogin();
+    monitor::emit_snapshot(&app, &state);
+    Ok(state.snapshot())
+}
+
 /// Show or hide the dashboard window, for manual sign-in.
 #[tauri::command]
 fn toggle_dashboard(app: tauri::AppHandle) -> Result<bool, String> {
@@ -313,6 +329,7 @@ pub fn run() {
             hide_popover,
             quit_app,
             toggle_dashboard,
+            clear_session,
         ])
         .setup(|app| {
             // Tray-only app: no dock icon, no app switcher entry.

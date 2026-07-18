@@ -141,15 +141,31 @@ real to authenticate against.
 4. Quit and relaunch: the session should still be valid, because the webview's
    cookie jar lives on disk (see below).
 
+### Clearing the session
+
+**Settings → Clear session data** erases cookies, local storage and caches via
+`clear_all_browsing_data()`, then reloads the login page. It takes two clicks —
+there is no undo, and it signs you out of the dashboard.
+
+Use it to switch accounts, or when a half-expired session leaves the page in a
+state that matches neither marker and every check reports `503`.
+
 ## Session persistence
 
 The hidden webview is built with `.data_directory(app_data_dir/webview-session)`, so cookies and
 local storage survive restarts and you stay logged in.
 
-**Platform caveat, worth knowing:** `data_directory` is honoured by WebView2 (Windows) and
-WebKitGTK (Linux). On **macOS**, `WKWebView` ignores it and persists into the app's own container
-instead (`~/Library/WebKit/com.pongllm.monitor/` and the app's cookie store). Persistence still
-works on all three platforms — only the *location* differs on macOS.
+**Platform caveat, verified rather than assumed:** `data_directory` is honoured by WebView2
+(Windows) and WebKitGTK (Linux). On **macOS** `WKWebView` ignores it — the directory is created
+and stays empty. Cookies land in `~/Library/HTTPStorages/pongllm.binarycookies` instead, keyed by
+the *executable* name. Persistence works on all three platforms; only the location differs.
+
+### Permissions
+
+Pong declares no macOS usage descriptions and requests nothing beyond notifications. It needs no
+accessibility, screen-recording or automation access: the synthetic interaction happens inside its
+own webview via injected JavaScript, not by driving the OS. If macOS prompts for anything else
+while you are developing, it is coming from your terminal or editor, not from this app.
 
 When a check comes back `401`, Pong:
 

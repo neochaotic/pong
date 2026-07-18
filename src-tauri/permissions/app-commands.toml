@@ -18,4 +18,5 @@ commands.allow = [
   "hide_popover",
   "quit_app",
   "toggle_dashboard",
+  "clear_session",
 ]

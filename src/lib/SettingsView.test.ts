@@ -21,11 +21,12 @@ const config: Config = {
 };
 
 /** Render with stub callbacks; returns them so assertions can inspect calls. */
-function setup(onSaveResult: string | null = null) {
+function setup(onSaveResult: string | null = null, onClearResult: string | null = null) {
   const onSave = vi.fn().mockResolvedValue(onSaveResult);
   const onClose = vi.fn();
-  render(SettingsView, { config, onSave, onClose });
-  return { onSave, onClose, user: userEvent.setup() };
+  const onClearSession = vi.fn().mockResolvedValue(onClearResult);
+  render(SettingsView, { config, onSave, onClose, onClearSession });
+  return { onSave, onClose, onClearSession, user: userEvent.setup() };
 }
 
 const field = (name: string) => screen.getByTestId(`field-${name}`);
@@ -101,6 +102,46 @@ describe("SettingsView", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(onSave.mock.calls[0][0].interaction).toBe("probe_only");
+  });
+
+  it("does not wipe the session on the first click", async () => {
+    const { onClearSession, user } = setup();
+
+    await user.click(screen.getByTestId("clear-session"));
+
+    // Signing the user out has no undo, so the first click only arms it.
+    expect(onClearSession).not.toHaveBeenCalled();
+    expect(screen.getByTestId("clear-session")).toHaveTextContent("Confirm");
+  });
+
+  it("wipes the session once confirmed", async () => {
+    const { onClearSession, user } = setup();
+
+    await user.click(screen.getByTestId("clear-session"));
+    await user.click(screen.getByTestId("clear-session"));
+
+    expect(onClearSession).toHaveBeenCalledOnce();
+  });
+
+  it("lets the user back out before confirming", async () => {
+    const { onClearSession, user } = setup();
+
+    await user.click(screen.getByTestId("clear-session"));
+    await user.click(screen.getByRole("button", { name: "cancel" }));
+
+    expect(onClearSession).not.toHaveBeenCalled();
+    expect(screen.getByTestId("clear-session")).toHaveTextContent("Clear session data");
+  });
+
+  it("surfaces a failure from the backend", async () => {
+    const { user } = setup(null, "Error: monitor webview is not running");
+
+    await user.click(screen.getByTestId("clear-session"));
+    await user.click(screen.getByTestId("clear-session"));
+
+    expect(await screen.findByTestId("form-errors")).toHaveTextContent(
+      "monitor webview is not running"
+    );
   });
 
   it("sends an emptied action button as null", async () => {

@@ -13,6 +13,7 @@
     quitApp,
     resizePopover,
     toggleDashboard,
+    clearSession,
     saveConfig,
   } from "./lib/api";
   import { describeReport, formatCountdown, shortenUrl } from "./lib/format";
@@ -73,6 +74,15 @@
       return null;
     } catch (error) {
       // The backend's validator is authoritative; surface its message verbatim.
+      return String(error);
+    }
+  }
+
+  async function wipeSession(): Promise<string | null> {
+    try {
+      snapshot = await clearSession();
+      return null;
+    } catch (error) {
       return String(error);
     }
   }
@@ -152,7 +162,7 @@
   </header>
 
   {#if view === "settings" && config}
-    <SettingsView {config} onSave={persist} onClose={closeSettings} />
+    <SettingsView {config} onSave={persist} onClose={closeSettings} onClearSession={wipeSession} />
   {:else if snapshot?.needs_relogin}
     <!-- Recovery path takes over the body: nothing else matters until it clears. -->
     <section class="flex flex-col gap-2">

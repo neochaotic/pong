@@ -17,6 +17,7 @@ const api = {
   quitApp: vi.fn(),
   resizePopover: vi.fn(),
   toggleDashboard: vi.fn(),
+  clearSession: vi.fn(),
   onSnapshot: vi.fn(),
   UPDATE_EVENT: "monitor://update",
 };

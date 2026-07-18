@@ -6,11 +6,14 @@
     config,
     onSave,
     onClose,
+    onClearSession,
   }: {
     config: Config;
     /** Resolves to a backend error message, or null when the save succeeded. */
     onSave: (config: Config) => Promise<string | null>;
     onClose: () => void;
+    /** Resolves to a backend error message, or null when the wipe succeeded. */
+    onClearSession: () => Promise<string | null>;
   } = $props();
 
   // Snapshot the incoming config exactly once: from here the form owns an
@@ -21,6 +24,22 @@
   let form = $state<FormState>(toForm(config));
   let errors = $state<string[]>([]);
   let saving = $state(false);
+  // Two-step: wiping the session signs the user out of the dashboard, and
+  // there is no undo.
+  let confirmingWipe = $state(false);
+  let wiping = $state(false);
+
+  async function clearSession() {
+    if (!confirmingWipe) {
+      confirmingWipe = true;
+      return;
+    }
+    wiping = true;
+    const failure = await onClearSession();
+    wiping = false;
+    confirmingWipe = false;
+    if (failure) errors = [failure];
+  }
 
   async function save() {
     // Validate locally first so typos never cost a round trip.
@@ -108,6 +127,33 @@
       Probe only — check the session without clicking or typing
     </span>
   </label>
+
+  <div class="flex flex-col gap-1 border-t border-line pt-3">
+    <span class={label}>SESSION</span>
+    <button
+      data-testid="clear-session"
+      class="rounded-md border px-2 py-1.5 text-[11px] transition
+             {confirmingWipe
+        ? 'border-danger bg-danger/10 text-danger'
+        : 'border-line bg-ink-900 text-fog hover:text-chalk'}"
+      onclick={clearSession}
+      disabled={wiping}
+    >
+      {wiping
+        ? "Clearing…"
+        : confirmingWipe
+          ? "Confirm — this signs you out"
+          : "Clear session data"}
+    </button>
+    {#if confirmingWipe && !wiping}
+      <button
+        class="self-start font-mono text-[9px] text-fog underline"
+        onclick={() => (confirmingWipe = false)}
+      >
+        cancel
+      </button>
+    {/if}
+  </div>
 
   {#if errors.length > 0}
     <ul class="flex flex-col gap-0.5" data-testid="form-errors">

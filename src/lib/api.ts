@@ -19,6 +19,8 @@ export const forceCheck = () => invoke<void>("force_check");
 export const openRelogin = () => invoke<void>("open_relogin");
 /** Show/hide the dashboard window for manual sign-in; resolves to its visibility. */
 export const toggleDashboard = () => invoke<boolean>("toggle_dashboard");
+/** Erase cookies and storage, then reload the login page. Destructive. */
+export const clearSession = () => invoke<MonitorSnapshot>("clear_session");
 export const closeRelogin = () => invoke<void>("close_relogin");
 export const hidePopover = () => invoke<void>("hide_popover");
 export const quitApp = () => invoke<void>("quit_app");
