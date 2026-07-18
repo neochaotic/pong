@@ -42,6 +42,29 @@ impl CronHandle {
         state: Arc<AppState>,
         cron: &str,
     ) -> Result<(), String> {
+        self.install_with(cron, move || {
+            let app = app.clone();
+            let state = state.clone();
+            Box::pin(async move {
+                monitor::run_health_check(app, state).await;
+            })
+        })
+        .await
+    }
+
+    /// The scheduling half of `install`, independent of what the job does.
+    ///
+    /// Taking the task as a closure keeps this testable: a scheduler that
+    /// silently stops firing, or that leaves the previous job running after a
+    /// cron change, is a failure the user would never see — the app just looks
+    /// idle forever.
+    pub async fn install_with<F>(&self, cron: &str, task: F) -> Result<(), String>
+    where
+        F: Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+            + Send
+            + Sync
+            + 'static,
+    {
         let mut guard = self.inner.lock().await;
 
         let scheduler = match guard.take() {
@@ -60,18 +83,103 @@ impl CronHandle {
             }
         };
 
-        let job = Job::new_async(cron, move |_uuid, _lock| {
-            let app = app.clone();
-            let state = state.clone();
-            Box::pin(async move {
-                monitor::run_health_check(app, state).await;
-            })
-        })
-        .map_err(|e| e.to_string())?;
+        let job =
+            Job::new_async(cron, move |_uuid, _lock| task()).map_err(|e| e.to_string())?;
 
         let id = scheduler.add(job).await.map_err(|e| e.to_string())?;
         *guard = Some((scheduler, id));
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod cron_tests {
+    use super::CronHandle;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    /// Count invocations of a job scheduled every second.
+    fn counting_task(counter: Arc<AtomicUsize>) -> impl Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+           + Send
+           + Sync
+           + 'static {
+        move || {
+            let counter = counter.clone();
+            Box::pin(async move {
+                counter.fetch_add(1, Ordering::SeqCst);
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fires_repeatedly_on_schedule() {
+        let handle = CronHandle::default();
+        let hits = Arc::new(AtomicUsize::new(0));
+
+        handle
+            .install_with("* * * * * *", counting_task(hits.clone()))
+            .await
+            .expect("every-second cron should install");
+
+        tokio::time::sleep(Duration::from_millis(3500)).await;
+
+        let count = hits.load(Ordering::SeqCst);
+        assert!(
+            (2..=5).contains(&count),
+            "expected roughly 3 ticks in 3.5s, got {count}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reinstalling_replaces_the_previous_job() {
+        let handle = CronHandle::default();
+        let first = Arc::new(AtomicUsize::new(0));
+        let second = Arc::new(AtomicUsize::new(0));
+
+        handle
+            .install_with("* * * * * *", counting_task(first.clone()))
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(2200)).await;
+        let before_swap = first.load(Ordering::SeqCst);
+        assert!(before_swap > 0, "the first job should have fired");
+
+        handle
+            .install_with("* * * * * *", counting_task(second.clone()))
+            .await
+            .expect("reinstall should succeed");
+        tokio::time::sleep(Duration::from_millis(2200).max(Duration::ZERO)).await;
+
+        // The replaced job must be gone, not merely shadowed: two live jobs
+        // would drive the dashboard twice per tick.
+        assert_eq!(
+            first.load(Ordering::SeqCst),
+            before_swap,
+            "the replaced job kept running after being swapped out"
+        );
+        assert!(
+            second.load(Ordering::SeqCst) > 0,
+            "the new job never fired after reinstall"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rejects_an_invalid_cron_without_disturbing_the_running_job() {
+        let handle = CronHandle::default();
+        let hits = Arc::new(AtomicUsize::new(0));
+
+        handle
+            .install_with("* * * * * *", counting_task(hits.clone()))
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+
+        let err = handle
+            .install_with("not a cron", counting_task(Arc::new(AtomicUsize::new(0))))
+            .await
+            .expect_err("garbage cron must be rejected");
+        assert!(!err.is_empty());
     }
 }
 
