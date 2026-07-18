@@ -119,6 +119,46 @@ fn rejects_empty_required_selector() {
 }
 
 #[test]
+fn submit_button_is_optional_and_defaults_to_none() {
+    let cfg = Config::from_json("{}").unwrap();
+    assert_eq!(cfg.selectors.submit_button, None);
+}
+
+#[test]
+fn submit_button_can_be_configured() {
+    let raw = r##"{"selectors":{"submit_button":"button[type=submit]"}}"##;
+    let cfg = Config::from_json(raw).unwrap();
+    assert_eq!(
+        cfg.selectors.submit_button.as_deref(),
+        Some("button[type=submit]")
+    );
+}
+
+#[test]
+fn rejects_an_empty_submit_button_selector() {
+    let raw = r##"{"selectors":{"submit_button":"  "}}"##;
+    let err = Config::from_json(raw).expect_err("blank selector must be rejected");
+    assert!(
+        matches!(err, ConfigError::EmptySelector { field } if field == "submit_button"),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn element_timeout_defaults_to_ten_seconds() {
+    // A single-page app mounts asynchronously; one shot at querySelector would
+    // report a healthy dashboard as broken.
+    assert_eq!(Config::from_json("{}").unwrap().element_timeout_ms, 10_000);
+}
+
+#[test]
+fn rejects_an_absurd_element_timeout() {
+    let raw = r##"{"element_timeout_ms": 900000}"##;
+    let err = Config::from_json(raw).expect_err("above the ceiling");
+    assert!(matches!(err, ConfigError::OutOfRange { field, .. } if field == "element_timeout_ms"));
+}
+
+#[test]
 fn rejects_absurd_settle_window() {
     let raw = r##"{ "settle_ms": 600000 }"##;
     let err = Config::from_json(raw).expect_err("settle_ms above the ceiling must be rejected");

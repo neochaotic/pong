@@ -12,10 +12,12 @@ export interface FormState {
   payload: string;
   settle_ms: string;
   typing_delay_ms: string;
+  element_timeout_ms: string;
   authenticated: string;
   login_indicator: string;
   action_button: string;
   text_input: string;
+  submit_button: string;
   notifications_enabled: boolean;
   probe_only: boolean;
 }
@@ -23,6 +25,7 @@ export interface FormState {
 /** Ceilings mirrored from `config.rs`, so the UI rejects before the backend does. */
 export const MAX_SETTLE_MS = 60_000;
 export const MAX_TYPING_DELAY_MS = 2_000;
+export const MAX_ELEMENT_TIMEOUT_MS = 120_000;
 
 export function toForm(config: Config): FormState {
   return {
@@ -31,10 +34,12 @@ export function toForm(config: Config): FormState {
     payload: config.payload,
     settle_ms: String(config.settle_ms),
     typing_delay_ms: String(config.typing_delay_ms),
+    element_timeout_ms: String(config.element_timeout_ms),
     authenticated: config.selectors.authenticated,
     login_indicator: config.selectors.login_indicator,
     action_button: config.selectors.action_button ?? "",
     text_input: config.selectors.text_input,
+    submit_button: config.selectors.submit_button ?? "",
     notifications_enabled: config.notifications_enabled,
     probe_only: config.interaction === "probe_only",
   };
@@ -47,12 +52,14 @@ export function toConfig(form: FormState): Config {
     payload: form.payload,
     settle_ms: Number(form.settle_ms),
     typing_delay_ms: Number(form.typing_delay_ms),
+    element_timeout_ms: Number(form.element_timeout_ms),
     selectors: {
       authenticated: form.authenticated.trim(),
       login_indicator: form.login_indicator.trim(),
       // An empty box means "no button to click", which the backend models as null.
       action_button: form.action_button.trim() === "" ? null : form.action_button.trim(),
       text_input: form.text_input.trim(),
+      submit_button: form.submit_button.trim() === "" ? null : form.submit_button.trim(),
     },
     notifications_enabled: form.notifications_enabled,
     interaction: form.probe_only ? "probe_only" : "full",
@@ -105,6 +112,9 @@ export function validateForm(form: FormState): string[] {
   }
   if (!isIntegerInRange(form.typing_delay_ms, MAX_TYPING_DELAY_MS)) {
     errors.push(`Typing delay must be 0–${MAX_TYPING_DELAY_MS} ms`);
+  }
+  if (!isIntegerInRange(form.element_timeout_ms, MAX_ELEMENT_TIMEOUT_MS)) {
+    errors.push(`Element timeout must be 0–${MAX_ELEMENT_TIMEOUT_MS} ms`);
   }
 
   return errors;

@@ -11,6 +11,8 @@ use std::str::FromStr;
 const MAX_SETTLE_MS: u64 = 60_000;
 /// Upper bound for the per-keystroke delay of the synthetic typist.
 const MAX_TYPING_DELAY_MS: u64 = 2_000;
+/// Upper bound for how long to wait on a single element.
+const MAX_ELEMENT_TIMEOUT_MS: u64 = 120_000;
 
 /// Errors produced while loading or validating a configuration.
 #[derive(Debug, thiserror::Error)]
@@ -61,6 +63,9 @@ fn default_payload() -> String {
 fn default_settle_ms() -> u64 {
     3_000
 }
+fn default_element_timeout_ms() -> u64 {
+    10_000
+}
 fn default_typing_delay_ms() -> u64 {
     60
 }
@@ -102,6 +107,11 @@ pub struct Selectors {
     /// The text input / textarea that receives the synthetic payload.
     #[serde(default = "default_text_input")]
     pub text_input: String,
+    /// Optional submit button. When set, the check waits for it to become
+    /// enabled and clicks it instead of relying on the Enter key — which is
+    /// what a React form with a disabled-until-valid button expects.
+    #[serde(default)]
+    pub submit_button: Option<String>,
 }
 
 impl Default for Selectors {
@@ -111,6 +121,7 @@ impl Default for Selectors {
             login_indicator: default_login_indicator(),
             action_button: None,
             text_input: default_text_input(),
+            submit_button: None,
         }
     }
 }
@@ -132,6 +143,12 @@ pub struct Config {
     /// How long to wait for the DOM to react after submitting.
     #[serde(default = "default_settle_ms")]
     pub settle_ms: u64,
+    /// How long to wait for an element to appear and become interactive.
+    ///
+    /// A single-page app mounts asynchronously; querying once and giving up
+    /// reports a healthy dashboard as broken.
+    #[serde(default = "default_element_timeout_ms")]
+    pub element_timeout_ms: u64,
     /// Delay between synthetic keystrokes.
     #[serde(default = "default_typing_delay_ms")]
     pub typing_delay_ms: u64,
@@ -153,6 +170,7 @@ impl Default for Config {
             selectors: Selectors::default(),
             payload: default_payload(),
             settle_ms: default_settle_ms(),
+            element_timeout_ms: default_element_timeout_ms(),
             typing_delay_ms: default_typing_delay_ms(),
             notifications_enabled: true,
             interaction: default_interaction(),
@@ -216,15 +234,24 @@ impl Config {
                 return Err(ConfigError::EmptySelector { field });
             }
         }
-        if let Some(button) = &self.selectors.action_button {
-            if button.trim().is_empty() {
-                return Err(ConfigError::EmptySelector {
-                    field: "action_button",
-                });
+        for (field, value) in [
+            ("action_button", &self.selectors.action_button),
+            ("submit_button", &self.selectors.submit_button),
+        ] {
+            if let Some(selector) = value {
+                if selector.trim().is_empty() {
+                    return Err(ConfigError::EmptySelector { field });
+                }
             }
         }
 
         check_range("settle_ms", self.settle_ms, 0, MAX_SETTLE_MS)?;
+        check_range(
+            "element_timeout_ms",
+            self.element_timeout_ms,
+            0,
+            MAX_ELEMENT_TIMEOUT_MS,
+        )?;
         check_range(
             "typing_delay_ms",
             self.typing_delay_ms,

@@ -19,6 +19,7 @@ export interface Selectors {
   login_indicator: string;
   action_button: string | null;
   text_input: string;
+  submit_button: string | null;
 }
 
 /** Mirrors `config::Config`. */
@@ -31,6 +32,7 @@ export interface Config {
   payload: string;
   settle_ms: number;
   typing_delay_ms: number;
+  element_timeout_ms: number;
   notifications_enabled: boolean;
   interaction: Interaction;
 }

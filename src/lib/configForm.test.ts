@@ -10,10 +10,12 @@ const config: Config = {
     login_indicator: "input[type=password]",
     action_button: "#new-chat",
     text_input: "textarea#prompt",
+    submit_button: null,
   },
   payload: "ping",
   settle_ms: 3000,
   typing_delay_ms: 60,
+  element_timeout_ms: 10000,
   notifications_enabled: true,
   interaction: "full",
 };

@@ -11,6 +11,7 @@ description = "Allows the tray popover to read state and drive the monitor."
 commands.allow = [
   "get_snapshot",
   "get_config",
+  "get_history",
   "save_config",
   "force_check",
   "open_relogin",

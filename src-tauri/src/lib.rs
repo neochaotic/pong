@@ -200,6 +200,12 @@ fn get_snapshot(state: tauri::State<'_, Arc<AppState>>) -> MonitorSnapshot {
     state.snapshot()
 }
 
+/// Past checks, newest first, for the history view.
+#[tauri::command]
+fn get_history(state: tauri::State<'_, Arc<AppState>>) -> Vec<crate::health::HealthReport> {
+    state.history()
+}
+
 #[tauri::command]
 fn get_config(state: tauri::State<'_, Arc<AppState>>) -> Config {
     state.config_snapshot()
@@ -330,6 +336,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
             get_config,
+            get_history,
             save_config,
             force_check,
             report_health,

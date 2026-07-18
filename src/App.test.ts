@@ -9,6 +9,7 @@ import type { MonitorSnapshot } from "./lib/types";
 const api = {
   getSnapshot: vi.fn(),
   getConfig: vi.fn(),
+  getHistory: vi.fn(),
   saveConfig: vi.fn(),
   forceCheck: vi.fn(),
   openRelogin: vi.fn(),
@@ -55,16 +56,19 @@ beforeEach(() => {
       login_indicator: "#login",
       action_button: null,
       text_input: "textarea",
+      submit_button: null,
     },
     payload: "ping",
     settle_ms: 3000,
     typing_delay_ms: 60,
+    element_timeout_ms: 10000,
     notifications_enabled: true,
     interaction: "full",
   });
   api.onSnapshot.mockResolvedValue(vi.fn());
   api.resizePopover.mockResolvedValue(undefined);
   api.toggleDashboard.mockResolvedValue(true);
+  api.getHistory.mockResolvedValue([]);
   api.forceCheck.mockResolvedValue(undefined);
 });
 
@@ -170,6 +174,38 @@ describe("recovery view", () => {
     await user.click(await screen.findByRole("button", { name: /I'm signed in/ }));
 
     expect(api.closeRelogin).toHaveBeenCalledOnce();
+  });
+});
+
+describe("history view", () => {
+  it("loads past checks when opened", async () => {
+    api.getHistory.mockResolvedValue([
+      {
+        code: 200,
+        verdict: "healthy",
+        detail: "dashboard responded",
+        latency_ms: 812,
+        at: new Date().toISOString(),
+      },
+    ]);
+    render(App);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "History" }));
+
+    await waitFor(() => expect(api.getHistory).toHaveBeenCalledOnce());
+    expect(await screen.findByTestId("history-row")).toBeInTheDocument();
+  });
+
+  it("returns to the monitor view from history", async () => {
+    render(App);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "History" }));
+    await user.click(await screen.findByRole("button", { name: "Back" }));
+
+    expect(await screen.findByRole("button", { name: "Force Check" })).toBeInTheDocument();
+    expect(api.resizePopover).toHaveBeenLastCalledWith(260);
   });
 });
 

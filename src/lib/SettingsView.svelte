@@ -92,6 +92,14 @@
   </div>
 
   <div class="flex flex-col gap-1">
+    <span class={label}>SUBMIT BUTTON (OPTIONAL)</span>
+    <input class={field} data-testid="field-submit_button" bind:value={form.submit_button} spellcheck="false" />
+    <span class="font-mono text-[9px] leading-snug text-fog">
+      Waits for it to become enabled, then clicks. Leave empty to press Enter.
+    </span>
+  </div>
+
+  <div class="flex flex-col gap-1">
     <span class={label}>PAYLOAD</span>
     <input class={field} data-testid="field-payload" bind:value={form.payload} spellcheck="false" />
   </div>
@@ -105,6 +113,14 @@
       <span class={label}>TYPING (MS)</span>
       <input class={field} data-testid="field-typing_delay_ms" bind:value={form.typing_delay_ms} inputmode="numeric" />
     </div>
+  </div>
+
+  <div class="flex flex-col gap-1">
+    <span class={label}>ELEMENT TIMEOUT (MS)</span>
+    <input class={field} data-testid="field-element_timeout_ms" bind:value={form.element_timeout_ms} inputmode="numeric" />
+    <span class="font-mono text-[9px] leading-snug text-fog">
+      How long to wait for a single-page app to mount an element.
+    </span>
   </div>
 
   <label class="flex items-center gap-2">

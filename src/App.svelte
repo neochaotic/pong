@@ -1,11 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import HistoryView from "./lib/HistoryView.svelte";
   import SettingsView from "./lib/SettingsView.svelte";
   import StatusBadge from "./lib/StatusBadge.svelte";
   import {
     closeRelogin,
     forceCheck,
     getConfig,
+    getHistory,
     getSnapshot,
     hidePopover,
     onSnapshot,
@@ -17,14 +19,15 @@
     saveConfig,
   } from "./lib/api";
   import { describeReport, formatCountdown, shortenUrl } from "./lib/format";
-  import type { Config, MonitorSnapshot } from "./lib/types";
+  import type { Config, HealthReport, MonitorSnapshot } from "./lib/types";
 
   const MONITOR_HEIGHT = 260;
   const SETTINGS_HEIGHT = 470;
 
   let snapshot = $state<MonitorSnapshot | null>(null);
   let config = $state<Config | null>(null);
-  let view = $state<"monitor" | "settings">("monitor");
+  let view = $state<"monitor" | "settings" | "history">("monitor");
+  let history = $state<HealthReport[]>([]);
   let nowSec = $state(Math.floor(Date.now() / 1000));
   let busy = $state(false);
   let reconnecting = $state(false);
@@ -60,6 +63,12 @@
     // Load fresh: the file may have been edited by hand since launch.
     config = await getConfig();
     view = "settings";
+    await resizePopover(SETTINGS_HEIGHT);
+  }
+
+  async function openHistory() {
+    history = await getHistory();
+    view = "history";
     await resizePopover(SETTINGS_HEIGHT);
   }
 
@@ -112,8 +121,8 @@
 
   function onKeydown(event: KeyboardEvent) {
     if (event.key !== "Escape") return;
-    if (view === "settings") closeSettings();
-    else hidePopover();
+    if (view === "monitor") hidePopover();
+    else closeSettings();
   }
 </script>
 
@@ -130,6 +139,30 @@
         <StatusBadge {phase} {verdict} />
         <!-- 28px hit area around a 16px glyph: an emoji at 10px was both hard
              to see and hard to click. -->
+        <button
+          class="flex size-7 items-center justify-center rounded-md text-fog
+                 transition hover:bg-ink-800 hover:text-chalk"
+          onclick={openHistory}
+          aria-label="History"
+          title="Check history"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M3 3v5h5" />
+            <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" />
+            <path d="M12 7v5l4 2" />
+          </svg>
+        </button>
         <button
           class="flex size-7 items-center justify-center rounded-md text-fog
                  transition hover:bg-ink-800 hover:text-chalk"
@@ -157,11 +190,15 @@
         </button>
       </div>
     {:else}
-      <span class="font-mono text-[10px] tracking-[0.14em] text-fog">SETTINGS</span>
+      <span class="font-mono text-[10px] tracking-[0.14em] text-fog">
+        {view === "history" ? "HISTORY" : "SETTINGS"}
+      </span>
     {/if}
   </header>
 
-  {#if view === "settings" && config}
+  {#if view === "history"}
+    <HistoryView {history} onClose={closeSettings} />
+  {:else if view === "settings" && config}
     <SettingsView {config} onSave={persist} onClose={closeSettings} onClearSession={wipeSession} />
   {:else if snapshot?.needs_relogin}
     <!-- Recovery path takes over the body: nothing else matters until it clears. -->

@@ -4,7 +4,7 @@ use crate::config::Config;
 use crate::health::{HealthReport, Phase, ProbePayload};
 use crate::scheduler;
 use chrono::{DateTime, Utc};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -23,6 +23,11 @@ impl Drop for CheckGuard<'_> {
         self.running.store(false, Ordering::SeqCst);
     }
 }
+
+/// How many past checks are kept. Enough to see a pattern (a flapping session,
+/// a slow degradation) without turning the popover into a log viewer or growing
+/// unbounded in a process that runs for weeks.
+pub const HISTORY_LIMIT: usize = 50;
 
 /// Everything the popover needs to render, in one message.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -61,6 +66,8 @@ pub struct AppState {
     phase: Mutex<Phase>,
     last_report: Mutex<Option<HealthReport>>,
     needs_relogin: Mutex<bool>,
+    /// Most recent checks, newest first.
+    history: Mutex<VecDeque<HealthReport>>,
     nonce: AtomicU64,
     /// Probes waiting for their report to come back from the webview.
     pending: Mutex<HashMap<u64, oneshot::Sender<ProbePayload>>>,
@@ -76,6 +83,7 @@ impl AppState {
             phase: Mutex::new(Phase::Ready),
             last_report: Mutex::new(None),
             needs_relogin: Mutex::new(false),
+            history: Mutex::new(VecDeque::with_capacity(HISTORY_LIMIT)),
             nonce: AtomicU64::new(1),
             pending: Mutex::new(HashMap::new()),
             running: AtomicBool::new(false),
@@ -121,7 +129,21 @@ impl AppState {
     pub fn record_report(&self, report: HealthReport) {
         *lock(&self.needs_relogin) = report.verdict.needs_relogin();
         self.set_phase(report.phase());
+
+        let mut history = lock(&self.history);
+        history.push_front(report.clone());
+        // Bounded: this process is expected to run for weeks.
+        while history.len() > HISTORY_LIMIT {
+            history.pop_back();
+        }
+        drop(history);
+
         *lock(&self.last_report) = Some(report);
+    }
+
+    /// Past checks, newest first.
+    pub fn history(&self) -> Vec<HealthReport> {
+        lock(&self.history).iter().cloned().collect()
     }
 
     pub fn needs_relogin(&self) -> bool {
@@ -316,6 +338,36 @@ mod tests {
         state.set_phase(Phase::Pinging);
         assert_eq!(state.phase(), Phase::Pinging);
         assert!(state.snapshot().next_run_unix.is_some());
+    }
+
+    #[test]
+    fn history_records_checks_newest_first() {
+        let s = state();
+        s.record_report(HealthReport::new(200, "first", 10));
+        s.record_report(HealthReport::new(401, "second", 20));
+
+        let history = s.history();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].detail, "second", "newest entry should lead");
+        assert_eq!(history[1].detail, "first");
+    }
+
+    #[test]
+    fn history_is_bounded() {
+        let s = state();
+        for i in 0..(HISTORY_LIMIT + 25) {
+            s.record_report(HealthReport::new(200, format!("check {i}"), 1));
+        }
+
+        let history = s.history();
+        assert_eq!(history.len(), HISTORY_LIMIT, "must not grow without bound");
+        // The oldest entries are the ones dropped.
+        assert_eq!(history[0].detail, format!("check {}", HISTORY_LIMIT + 24));
+    }
+
+    #[test]
+    fn history_starts_empty() {
+        assert!(state().history().is_empty());
     }
 
     #[test]

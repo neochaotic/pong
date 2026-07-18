@@ -2,13 +2,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-import type { Config, MonitorSnapshot } from "./types";
+import type { Config, HealthReport, MonitorSnapshot } from "./types";
 
 /** Must match `monitor::UPDATE_EVENT`. */
 export const UPDATE_EVENT = "monitor://update";
 
 export const getSnapshot = () => invoke<MonitorSnapshot>("get_snapshot");
 export const getConfig = () => invoke<Config>("get_config");
+/** Past checks, newest first. */
+export const getHistory = () => invoke<HealthReport[]>("get_history");
 export const saveConfig = (config: Config) =>
   invoke<MonitorSnapshot>("save_config", { config });
 

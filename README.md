@@ -77,6 +77,22 @@ browser engine with real cookies, so a check exercises the same path a human wou
    └────────────────┘     └───────────────────────────────────┘
 ```
 
+### Waiting, not guessing
+
+A single-page app mounts asynchronously, so querying the DOM once and giving up
+reports a healthy dashboard as broken — a false negative, the worst failure mode
+for a monitor.
+
+Every lookup during a check goes through `waitForElement`, which polls every
+100ms up to `element_timeout_ms` and requires the element to be *interactive*,
+not merely present: not `disabled`, not `aria-disabled`, and not zero-sized.
+
+That distinction carries real signal. A React form typically keeps its submit
+button disabled until the editor reports content, so **waiting for the button to
+enable is itself a check that the synthetic typing reached the app's state** — not
+just the DOM. If it never enables, the report says so explicitly rather than
+blaming the dashboard.
+
 ### Typing into rich editors
 
 `full` interaction handles two very different targets:
@@ -184,6 +200,13 @@ logged out does not nag you every cron tick.
 
 ---
 
+## History
+
+The popover keeps the last 50 checks — click the clock icon. Each row shows the
+time, status code, detail and latency, with a healthy/total summary at the top.
+
+The buffer is bounded on purpose: this process is expected to run for weeks.
+
 ## Configuration
 
 `config.json` is created on first launch, in the OS config directory:
@@ -226,10 +249,12 @@ logged out does not nag you every cron tick.
 | `selectors.authenticated` | Present **only** when logged in. This is the health signal.                  |
 | `selectors.login_indicator` | Present **only** when logged out. Drives the 401 path.                    |
 | `selectors.action_button` | Optional. Clicked before typing. Use `null` to skip.                        |
+| `selectors.submit_button` | Optional. Waited on until enabled, then clicked. Falls back to Enter if unset. |
 | `selectors.text_input`    | `<input>`, `<textarea>` or a `contenteditable` element.                     |
 | `payload`                 | The string typed during a check.                                            |
 | `settle_ms`               | How long to wait for the DOM after Enter. Max `60000`.                      |
 | `typing_delay_ms`         | Per-keystroke delay. Max `2000`.                                            |
+| `element_timeout_ms`      | How long to wait for an element to mount and become usable. Max `120000`.   |
 | `notifications_enabled`   | Native OS notification on session expiry.                                   |
 | `interaction`             | `probe_only` (default) inspects the DOM only. `full` clicks, types and submits. |
 

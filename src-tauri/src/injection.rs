@@ -18,6 +18,8 @@ pub struct InjectionParams {
     pub payload: String,
     pub settle_ms: u64,
     pub typing_delay_ms: u64,
+    /// How long the agent waits for an element to appear and become usable.
+    pub element_timeout_ms: u64,
     /// Correlates the eventual report with this run; stale reports are dropped.
     pub nonce: u64,
 }
@@ -33,6 +35,7 @@ impl InjectionParams {
             payload: cfg.payload.clone(),
             settle_ms: cfg.settle_ms,
             typing_delay_ms: cfg.typing_delay_ms,
+            element_timeout_ms: cfg.element_timeout_ms,
             nonce,
         }
     }
@@ -73,10 +76,12 @@ mod tests {
                 login_indicator: "input[type=password]".into(),
                 action_button: None,
                 text_input: text_input.into(),
+                submit_button: None,
             },
             payload: payload.into(),
             settle_ms: 3000,
             typing_delay_ms: 60,
+            element_timeout_ms: 10_000,
             nonce: 42,
         }
     }

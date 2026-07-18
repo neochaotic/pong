@@ -48,6 +48,38 @@
     }
   };
 
+  // --- resilient element lookup -----------------------------------------
+  //
+  // A React SPA mounts asynchronously. Querying once and giving up reports a
+  // healthy dashboard as broken purely because the check arrived first — a
+  // false negative, which is the worst failure mode for a monitor.
+  //
+  // "Interactive" means more than present: a submit button typically renders
+  // disabled and only enables once the editor holds content, so waiting for
+  // existence alone would click a dead button.
+
+  function isInteractive(el) {
+    if (!el) return false;
+    if (el.disabled === true) return false;
+    if (el.getAttribute && el.getAttribute("aria-disabled") === "true") return false;
+    // Zero-area elements are still in the tree but cannot be clicked.
+    var box = el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+    if (box && box.width === 0 && box.height === 0) return false;
+    return true;
+  }
+
+  function waitForElement(selector, timeoutMs, requireInteractive) {
+    var deadline = Date.now() + (timeoutMs || 10000);
+    return new Promise(function (resolve) {
+      (function poll() {
+        var el = q(selector);
+        if (el && (!requireInteractive || isInteractive(el))) return resolve(el);
+        if (Date.now() >= deadline) return resolve(null);
+        setTimeout(poll, 100);
+      })();
+    });
+  }
+
   // React/Vue cache the input value on their own state: a plain `el.value = x`
   // is silently reverted. Going through the prototype's native setter is what
   // makes the framework observe the change.
@@ -248,10 +280,13 @@
       });
     },
 
-    // Full synthetic interaction: click, type, submit, wait, re-probe.
+    // Full synthetic interaction. Every DOM lookup goes through waitForElement,
+    // because in a single-page app the check routinely arrives before React has
+    // finished mounting — and reporting that as a failure is a false negative.
     runCheck: async function (p) {
       var started = performance.now();
       var self = this;
+      var timeout = p.element_timeout_ms || 10000;
       var done = function (code, detail) {
         invoke({
           code: code,
@@ -274,19 +309,41 @@
         var pre = self.probe(p);
         if (pre.code !== 200) return done(pre.code, pre.detail);
 
+        // 1. Optional entry point (e.g. "new conversation").
         if (p.selectors.action_button) {
-          var btn = q(p.selectors.action_button);
-          if (btn) {
-            btn.click();
-            await sleep(400);
+          var btn = await waitForElement(p.selectors.action_button, timeout, true);
+          if (!btn) {
+            return done(503, "action button never became clickable: " + p.selectors.action_button);
           }
+          btn.click();
         }
 
-        var input = q(p.selectors.text_input);
-        if (!input) return done(503, "text input not found: " + p.selectors.text_input);
+        // 2. The editor itself.
+        var input = await waitForElement(p.selectors.text_input, timeout, true);
+        if (!input) {
+          return done(503, "text input never appeared: " + p.selectors.text_input);
+        }
 
+        // 3. Type the payload the way a person would.
         await typeInto(input, p.payload, p.typing_delay_ms);
-        submit(input);
+
+        // 4. Submit. A React form usually keeps its button disabled until the
+        //    editor reports content, so waiting for it to *enable* is also a
+        //    check that the typing actually reached the app's state.
+        if (p.selectors.submit_button) {
+          var submitBtn = await waitForElement(p.selectors.submit_button, timeout, true);
+          if (!submitBtn) {
+            return done(
+              503,
+              "submit button never enabled — the editor likely never registered the input"
+            );
+          }
+          submitBtn.click();
+        } else {
+          submit(input);
+        }
+
+        // 5. Let the dashboard react, then confirm we are still authenticated.
         await sleep(p.settle_ms);
 
         var post = self.probe(p);
