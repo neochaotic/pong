@@ -25,6 +25,7 @@ jobs:
         with: { node-version: 22, cache: pnpm }
 
       - run: pnpm install --frozen-lockfile
+      - run: pnpm check:version
       - run: pnpm check
       # Fails below the 70% floor configured in vitest.config.ts.
       - run: pnpm test:coverage

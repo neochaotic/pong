@@ -1,6 +1,6 @@
 {
   "name": "pongllm",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Synthetic web health monitor that lives in the system tray",
   "type": "module",
   "private": true,
@@ -15,7 +15,8 @@
     "test:coverage": "vitest run --coverage",
     "test:rust": "cd src-tauri && cargo test",
     "test:rust:coverage": "cd src-tauri && cargo llvm-cov --summary-only --ignore-filename-regex '(lib|tray|main)\\.rs$' --fail-under-lines 70",
-    "verify": "pnpm check && pnpm test:coverage && pnpm test:rust:coverage"
+    "verify": "pnpm check:version && pnpm check && pnpm test:coverage && pnpm test:rust:coverage",
+    "check:version": "node scripts/check-version.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1"

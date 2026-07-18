@@ -291,7 +291,7 @@ pnpm tauri build    # produce a bundle
 ### Tests
 
 ```bash
-pnpm verify              # types + both suites + both coverage gates
+pnpm verify              # versions + types + both suites + both coverage gates
 ```
 
 Or individually:
@@ -304,6 +304,29 @@ pnpm test:rust:coverage  # Rust coverage, fails under 70%
 pnpm check               # svelte-check
 cd src-tauri && cargo clippy --all-targets && cargo fmt --check
 ```
+
+### Releasing
+
+Versions live in three manifests (`package.json`, `src-tauri/tauri.conf.json`,
+`src-tauri/Cargo.toml`) and `pnpm check:version` asserts they agree.
+
+Tag to publish. The tag carries the pre-release identifier; the manifests stay numeric:
+
+```bash
+git tag v0.0.1-rc1 && git push origin v0.0.1-rc1   # flagged pre-release
+git tag v0.0.1     && git push origin v0.0.1       # flagged stable
+```
+
+> **Why the manifest cannot say `0.0.1-rc1`.** Tauri's Windows bundlers reject
+> pre-release identifiers ([#5286](https://github.com/tauri-apps/tauri/issues/5286),
+> [#12470](https://github.com/tauri-apps/tauri/issues/12470)). Such a version builds
+> fine on macOS and Linux, then fails only in the Windows release job.
+> `pnpm check:version` blocks it locally so you find out in seconds, not after a
+> 15-minute matrix build.
+
+Any tag with a `-suffix` is marked as a pre-release on GitHub, so it never
+becomes "Latest release". Releases are created as drafts — review the installers
+before publishing.
 
 ### Coverage
 

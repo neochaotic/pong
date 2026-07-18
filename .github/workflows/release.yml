@@ -1,7 +1,13 @@
 name: Release
 
 # Tag a version to publish installers:
-#   git tag v0.1.0 && git push origin v0.1.0
+#   git tag v0.0.1-rc1 && git push origin v0.0.1-rc1   -> marked pre-release
+#   git tag v0.0.1     && git push origin v0.0.1       -> marked stable
+#
+# The tag carries the pre-release identifier; the manifests stay numeric.
+# Tauri's Windows bundlers reject versions with a `-suffix` outright
+# (tauri-apps/tauri#5286), so `0.0.1-rc1` in tauri.conf.json would build on
+# macOS and Linux and fail only here.
 on:
   push:
     tags: ["v*"]
@@ -89,4 +95,6 @@ jobs:
             *More info* → *Run anyway*. Signing requires a paid Apple Developer
             account and a Windows code-signing certificate.
           releaseDraft: true
-          prerelease: false
+          # Any tag carrying a suffix (v0.0.1-rc1, -alpha1, -beta2) is flagged
+          # as a pre-release, so it never shows up as "Latest release".
+          prerelease: ${{ contains(github.ref_name, '-') }}
