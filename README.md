@@ -30,11 +30,13 @@ dashboard actually responded. It is a synthetic transaction monitor, not a ping:
 
 Grab the installer for your platform from the [latest release](https://github.com/neochaotic/pong/releases/latest):
 
-| Platform | File |
-| --- | --- |
-| macOS (Apple Silicon / Intel) | `.dmg` |
-| Windows | `.msi` or `.exe` |
-| Linux | `.AppImage` or `.deb` |
+| Platform | File | Notes |
+| --- | --- | --- |
+| macOS (Apple Silicon / Intel) | `.dmg` | drag to Applications |
+| Windows | `.msi` or `.exe` | `.msi` for managed installs |
+| **Linux — any distro** | `.AppImage` | portable; `chmod +x` and run, no install |
+| Debian / Ubuntu | `.deb` | `sudo apt install ./Pong_*.deb` |
+| Fedora / RHEL / openSUSE | `.rpm` | `sudo dnf install ./Pong-*.rpm` |
 
 > **The builds are not code-signed.** On macOS the first launch is blocked: right-click the app →
 > *Open* → *Open*, or run `xattr -cr /Applications/Pong.app`. On Windows, SmartScreen shows a warning:

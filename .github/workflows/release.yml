@@ -87,7 +87,9 @@ jobs:
             | macOS (Apple Silicon) | `.dmg` — aarch64 |
             | macOS (Intel) | `.dmg` — x64 |
             | Windows | `.msi` / `.exe` |
-            | Linux | `.AppImage` / `.deb` |
+            | Linux (any distro) | `.AppImage` — portable, no install |
+            | Debian / Ubuntu | `.deb` |
+            | Fedora / RHEL / openSUSE | `.rpm` |
 
             **These builds are not code-signed.** macOS will refuse the first
             launch: right-click the app → *Open* → *Open*, or run
