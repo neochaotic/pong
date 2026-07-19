@@ -11,7 +11,7 @@
 
 [![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com/neochaotic/pong/releases/latest)
 [![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)](https://tauri.app)
-[![Rust](https://img.shields.io/badge/Rust-1.77+-CE422B?logo=rust&logoColor=white)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/Rust-1.77.2+-CE422B?logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white)](https://svelte.dev)
 [![Coverage](https://img.shields.io/badge/coverage-93%25%20web%20%7C%2082%25%20rust-4cb782)](#coverage)
 
@@ -51,6 +51,28 @@ Grab the installer for your platform from the [latest release](https://github.co
 > *Open* → *Open*, or run `xattr -cr /Applications/Pong.app`. On Windows, SmartScreen shows a warning:
 > *More info* → *Run anyway*. Signing needs a paid Apple Developer account and a Windows
 > code-signing certificate.
+
+### Uninstalling
+
+Pong launches at login by default (Settings → *Launch at login*, on by default — a tray monitor
+that doesn't come back after a reboot isn't much of a monitor). None of the three installers know
+to remove that login-item registration, because Pong creates it itself at runtime, after install —
+**turn the toggle off before you uninstall**, or the OS will keep a harmless but orphaned entry
+pointing at a binary that no longer exists (it just silently fails to launch; it won't error or
+affect anything else).
+
+If you already uninstalled without turning it off first, or want to clean up by hand:
+
+| Platform | Login item | Also removes |
+| --- | --- | --- |
+| macOS | Delete `~/Library/LaunchAgents/Pong.plist` | `~/Library/Application Support/com.pongllm.monitor/`, `~/Library/Logs/com.pongllm.monitor/` |
+| Windows | Delete the `Pong` value under `HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\Run` (`regedit`, or `reg delete "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Run" /v Pong`) | `%APPDATA%\com.pongllm.monitor\` |
+| Linux | Delete `~/.config/autostart/Pong.desktop` | `~/.config/com.pongllm.monitor/` |
+
+The "also removes" column is Pong's config, logs and the hidden webview's session data (cookies,
+local storage — this is what keeps you signed in) — none of it is touched by the OS installers'
+own uninstall/remove step either, so it's worth clearing at the same time if you want a truly clean
+removal rather than a reinstall-friendly one.
 
 ---
 
@@ -248,6 +270,7 @@ The buffer is bounded on purpose: this process is expected to run for weeks.
   "settle_ms": 3000,
   "typing_delay_ms": 60,
   "notifications_enabled": true,
+  "autostart_enabled": true,
   "interaction": "probe_only"
 }
 ```
@@ -282,6 +305,7 @@ The buffer is bounded on purpose: this process is expected to run for weeks.
 | `typing_delay_ms`         | Per-keystroke delay. Max `2000`.                                            |
 | `element_timeout_ms`      | How long to wait for an element to mount and become usable. Max `120000`.   |
 | `notifications_enabled`   | Native OS notification on session expiry.                                   |
+| `autostart_enabled`       | Launch at login. Defaults to `true`; kept in sync with the OS's actual registration on every launch and every save. See [Uninstalling](#uninstalling). |
 | `interaction`             | `probe_only` (default) inspects the DOM only. `full` clicks, types and submits. |
 
 Invalid values are rejected with a specific error rather than silently defaulted — a bad cron
@@ -408,6 +432,33 @@ to an SSO provider.
 
 ---
 
+## Known issues (this RC)
+
+Development and day-to-day testing so far has been on macOS. CI compiles, tests and bundles Pong
+on all three platforms on every push (see `ci.yml`'s `test-matrix` and `bundle` jobs) — but that
+proves the *build* works, not that the UI *looks* right on a real Windows or Linux desktop, which
+no one has checked yet. Flagging the specific risk areas rather than a vague "may vary by platform":
+
+- **The popover window** (`transparent(true)` + `decorations(false)` + `always_on_top(true)`) is the
+  entire UI. This exact combination has historically been the least portable part of Tauri across
+  Windows (pre-Windows 11 or without Mica) and Linux (WebKitGTK + compositor) — the known failure
+  mode is a solid black background instead of a transparent one, rather than a crash. If you hit
+  this, it's a real bug worth reporting, not a "works as intended" platform quirk.
+- **The tray icon** is a template image (`icon_as_template(true)`), which macOS recolors
+  automatically to match the menu bar. That setting does nothing on Windows/Linux — the icon
+  renders in its literal colors there, which may not read well against every taskbar.
+- **Linux tray icons need `libappindicator3`** (bundled as a dependency of the `.deb`/`.rpm`) and,
+  on GNOME specifically, a shell extension (e.g. AppIndicator/KStatusNotifierItem) — without one,
+  the tray icon will not appear at all. This is a GNOME limitation, not something Pong's installer
+  can fix.
+- **Builds are not code-signed** (see [Install](#install)) — expected friction on first launch on
+  both macOS and Windows, not a bug.
+
+If you're testing on Windows or Linux, a report of "the popover looks/behaves like X" — good or
+bad — is exactly the signal this RC is for.
+
+---
+
 ## Development
 
 ```bash
@@ -436,9 +487,9 @@ pnpm verify              # versions + types + both suites + both coverage gates
 Or individually:
 
 ```bash
-pnpm test                # 109 Vitest tests
+pnpm test                # 133 Vitest tests
 pnpm test:coverage       # frontend coverage, fails under 70%
-pnpm test:rust           # 121 Rust tests
+pnpm test:rust           # 138 Rust tests
 pnpm test:rust:coverage  # Rust coverage, fails under 70%
 pnpm check               # svelte-check
 cd src-tauri && cargo clippy --all-targets && cargo fmt --check
@@ -473,8 +524,8 @@ Both suites enforce a **70% floor** and currently sit well above it:
 
 | | Statements / Regions | Lines |
 | --- | --- | --- |
-| Frontend | 93.2% | 95.8% |
-| Rust (logic) | 79.9% | 82.2% |
+| Frontend | 93.5% | 95.7% |
+| Rust (logic) | 82.4% | 84.2% |
 
 **What the Rust number excludes, and why.** `lib.rs`, `tray.rs` and `main.rs` are wiring:
 window construction, IPC registration, tray callbacks. None of it exists until a real app,
