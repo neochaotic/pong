@@ -429,9 +429,7 @@ describe("recovery view", () => {
 
     expect(api.openRelogin).toHaveBeenCalledOnce();
     // The button now offers to finish the flow instead.
-    expect(
-      await screen.findByRole("button", { name: /I'm signed in/ })
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Check now" })).toBeInTheDocument();
   });
 
   it("resumes monitoring once the user confirms sign-in", async () => {
@@ -442,9 +440,47 @@ describe("recovery view", () => {
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole("button", { name: "Reconnect dashboard" }));
-    await user.click(await screen.findByRole("button", { name: /I'm signed in/ }));
+    await user.click(await screen.findByRole("button", { name: "Check now" }));
 
     expect(api.closeRelogin).toHaveBeenCalledOnce();
+  });
+
+  it("shows a calm status, and stays put, when a confirm click doesn't actually verify sign-in", async () => {
+    api.getSnapshot.mockResolvedValue(snapshot({ needs_relogin: true, phase: "ERROR" }));
+    api.openRelogin.mockResolvedValue(undefined);
+    api.closeRelogin.mockRejectedValue(new Error("still not signed in — login screen detected"));
+    render(App);
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Reconnect dashboard" }));
+    await user.click(await screen.findByRole("button", { name: "Check now" }));
+
+    // Phrased as an expected status, not the raw backend error text — this
+    // is the normal state for as long as someone is mid sign-in.
+    expect(await screen.findByTestId("reconnect-status")).toHaveTextContent(
+      "Not signed in yet."
+    );
+    // Still offering the same confirm step, not silently back to the resting state.
+    expect(screen.getByRole("button", { name: "Check now" })).toBeInTheDocument();
+  });
+
+  it("retries silently, without alarming the user, on a same-instant collision with a background check", async () => {
+    api.getSnapshot.mockResolvedValue(snapshot({ needs_relogin: true, phase: "ERROR" }));
+    api.openRelogin.mockResolvedValue(undefined);
+    api.closeRelogin
+      .mockRejectedValueOnce(new Error("a check is currently running — try again in a moment"))
+      .mockResolvedValueOnce(undefined);
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ delay: null });
+    render(App);
+
+    await user.click(await screen.findByRole("button", { name: "Reconnect dashboard" }));
+    await user.click(await screen.findByRole("button", { name: "Check now" }));
+    await vi.advanceTimersByTimeAsync(1500);
+
+    expect(api.closeRelogin).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId("reconnect-status")).not.toBeInTheDocument();
+    vi.useRealTimers();
   });
 });
 

@@ -327,6 +327,14 @@ fn clear_session(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<MonitorSnapshot, String> {
+    // Wiping cookies and navigating the webview while a health/usage check is
+    // mid-flight on that same webview is a real race, not a theoretical one —
+    // it has been observed to leave the webview unusable until restart. The
+    // same guard the checks use makes the two mutually exclusive.
+    let Some(_guard) = state.try_begin_check() else {
+        return Err("a check is currently running — try again in a moment".into());
+    };
+
     let target = state.config_snapshot().target_url;
     monitor::clear_session(&app, &target)?;
 
@@ -348,15 +356,16 @@ fn open_relogin(app: tauri::AppHandle) -> Result<(), String> {
     monitor::show_relogin(&app)
 }
 
+/// "I'm signed in — resume monitoring": re-verifies the session with a real
+/// heartbeat before clearing the recovery banner, rather than trusting the
+/// click alone. See `monitor::confirm_relogin` for why that trust broke.
 #[tauri::command]
-fn close_relogin(
+async fn close_relogin(
     app: tauri::AppHandle,
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
-    monitor::hide_relogin(&app)?;
-    state.clear_relogin();
-    monitor::emit_snapshot(&app, &state);
-    Ok(())
+    let state = state.inner().clone();
+    monitor::confirm_relogin(&app, &state).await
 }
 
 #[tauri::command]
@@ -614,6 +623,20 @@ fn build_hidden_webview(app: &tauri::AppHandle, config: &Config) -> tauri::Resul
         })
         .build()?;
 
+    // This is the one persistent webview holding the whole session — losing
+    // it isn't like closing a normal window, it breaks every check until the
+    // app restarts. Nothing guarded that before: the window has standard
+    // native chrome (a close button) and clicking it destroyed the window
+    // outright. Hide instead, exactly like the popover already does on
+    // focus loss.
+    let handle = webview.clone();
+    webview.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = handle.hide();
+        }
+    });
+
     #[cfg(debug_assertions)]
     webview.open_devtools();
 
@@ -635,6 +658,10 @@ fn start_ticker(app: tauri::AppHandle, state: Arc<AppState>) {
     tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(TICK).await;
+            // A no-op unless the recovery banner is showing — see
+            // `poll_relogin` for why this is safe to run passively rather
+            // than waiting for the user to click "I'm signed in".
+            monitor::poll_relogin(&app, &state).await;
             monitor::emit_snapshot(&app, &state);
         }
     });
