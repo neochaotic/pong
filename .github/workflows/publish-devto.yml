@@ -34,11 +34,19 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write # the publish step commits the returned article id back to the repo
-    # Skip entirely if the token secret is not configured, so forks/CI stay green.
     if: ${{ github.repository == 'neochaotic/pong' }}
     steps:
       - uses: actions/checkout@v7
+      - name: Check for DEVTO_TOKEN
+        # Neither job- nor step-level `if:` can see `secrets` directly — only
+        # `env:`/`with:` can — so route it through a step output instead of
+        # letting the publish step fail outright on a missing key.
+        id: devto
+        env:
+          DEVTO_TOKEN: ${{ secrets.DEVTO_TOKEN }}
+        run: echo "present=${DEVTO_TOKEN:+true}" >> "$GITHUB_OUTPUT"
       - name: Publish articles on dev.to
+        if: steps.devto.outputs.present == 'true'
         uses: sinedied/publish-devto@v2
         env:
           GIT_COMMITTER_NAME: neochaotic
