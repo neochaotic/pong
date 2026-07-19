@@ -427,6 +427,7 @@ pub fn run() {
 
             let config_dir = app.path().app_config_dir()?;
             let config_path = config_dir.join("config.json");
+            let is_first_launch = !config_path.exists();
             let config = Config::load_or_create(&config_path)?;
 
             let state = Arc::new(AppState::new(config.clone(), config_path));
@@ -445,6 +446,21 @@ pub fn run() {
             build_popover(&handle)?;
             build_hidden_webview(&handle, &config)?;
             tray::build(&handle)?;
+
+            // Pong has no Dock icon and opens no window, so a fresh install finishing
+            // with nothing on screen is indistinguishable from a silently failed one
+            // (see docs/installing.md). One notification on the very first launch —
+            // detected by the config file not existing yet — fixes that without
+            // nagging on every subsequent normal startup.
+            if is_first_launch && config.notifications_enabled {
+                use tauri_plugin_notification::NotificationExt;
+                let _ = handle
+                    .notification()
+                    .builder()
+                    .title("Pong")
+                    .body("Pong is running — look for its icon in the menu bar.")
+                    .show();
+            }
 
             if config.cron_enabled {
                 start_scheduler(handle.clone(), state.clone(), config.cron.clone());
