@@ -84,12 +84,19 @@ impl UsageProbePayload {
     }
 }
 
-/// Parses free text like "Resets in 3 hr 43 min" or "Reinicia em 3 h 48 min"
-/// into a duration, by scanning for number-then-unit pairs rather than
-/// matching a fixed phrase — the phrase itself is localized, the shape
-/// (digits, then a unit starting with "h" or "min") is not.
+/// Parses free text like "Resets in 3 hr 43 min", "Reinicia em 3 h 48 min",
+/// or "Resets in 6 days" into a duration, by scanning for number-then-unit
+/// pairs rather than matching a fixed phrase — the phrase itself is
+/// localized, the shape (digits, then a unit) is not.
+///
+/// Days matter because the weekly limit's countdown switches units with
+/// distance: close to reset it reads in hours/minutes, but right after a
+/// reset — a full week away again — the page switches to "X days" with no
+/// hour/minute component at all. A parser that only understood "h"/"min"
+/// silently failed once a week, immediately after every reset.
 fn parse_reset_offset(text: &str) -> Option<ChronoDuration> {
     let tokens: Vec<&str> = text.split_whitespace().collect();
+    let mut days: i64 = 0;
     let mut hours: i64 = 0;
     let mut minutes: i64 = 0;
     let mut found = false;
@@ -105,13 +112,20 @@ fn parse_reset_offset(text: &str) -> Option<ChronoDuration> {
         if unit.starts_with("min") {
             minutes = n;
             found = true;
+        } else if unit.starts_with("day") || unit.starts_with("dia") {
+            // English "day(s)" and Portuguese "dia(s)" both start with 'd',
+            // ahead of the "h" check below so neither is ever mistaken for it.
+            days = n;
+            found = true;
         } else if unit.starts_with('h') {
             hours = n;
             found = true;
         }
     }
 
-    found.then(|| ChronoDuration::hours(hours) + ChronoDuration::minutes(minutes))
+    found.then(|| {
+        ChronoDuration::days(days) + ChronoDuration::hours(hours) + ChronoDuration::minutes(minutes)
+    })
 }
 
 #[cfg(test)]
@@ -139,6 +153,32 @@ mod tests {
         assert_eq!(
             parse_reset_offset("Resets in 45 min"),
             Some(ChronoDuration::minutes(45))
+        );
+    }
+
+    #[test]
+    fn parses_days_only_english() {
+        // What the weekly limit shows right after it resets: a full week
+        // away again, with no hour/minute component at all.
+        assert_eq!(
+            parse_reset_offset("Resets in 6 days"),
+            Some(ChronoDuration::days(6))
+        );
+    }
+
+    #[test]
+    fn parses_days_only_portuguese() {
+        assert_eq!(
+            parse_reset_offset("Reinicia em 6 dias"),
+            Some(ChronoDuration::days(6))
+        );
+    }
+
+    #[test]
+    fn parses_days_combined_with_hours() {
+        assert_eq!(
+            parse_reset_offset("Resets in 1 day 4 hr"),
+            Some(ChronoDuration::days(1) + ChronoDuration::hours(4))
         );
     }
 
