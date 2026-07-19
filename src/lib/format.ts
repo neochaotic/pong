@@ -19,6 +19,27 @@ export function formatCountdown(seconds: number | null): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
 }
 
+/**
+ * Human-friendly duration for something hours or days out — "3h 20min",
+ * "2d 5h", "45min" — rounded to the coarsest two units that matter. Unlike
+ * `formatCountdown` (a ticking clock built for short, frequent countdowns
+ * like the next health check), a usage-limit reset can be a week away, and a
+ * second-precision `HH:MM:SS` reads as noise at that distance.
+ */
+export function formatHumanDuration(seconds: number | null): string {
+  if (seconds === null || !Number.isFinite(seconds)) return "unknown";
+
+  const total = Math.max(0, Math.floor(seconds));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+
+  if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}min` : `${hours}h`;
+  if (minutes > 0) return `${minutes}min`;
+  return "< 1 min";
+}
+
 /** The badge label shown next to the status dot. */
 export function badgeLabel(phase: Phase, verdict: Verdict | null): string {
   if (phase === "PINGING") return "PINGING";

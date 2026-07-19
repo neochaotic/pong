@@ -205,6 +205,15 @@ pub struct Config {
     pub typing_delay_ms: u64,
     #[serde(default = "default_true")]
     pub notifications_enabled: bool,
+    /// Whether Pong is registered to launch at login.
+    ///
+    /// Defaults to `true`: a tray-resident monitor that does not survive a
+    /// reboot without the user remembering to relaunch it by hand mostly
+    /// defeats the point. Kept in sync with the OS's actual registration on
+    /// every launch and every save, rather than trusted blindly, so it never
+    /// silently drifts from what's really registered.
+    #[serde(default = "default_true")]
+    pub autostart_enabled: bool,
     /// Whether a check drives the page or merely inspects it.
     ///
     /// Defaults to `probe_only` so a freshly installed app never types into
@@ -233,6 +242,7 @@ impl Default for Config {
             element_timeout_ms: default_element_timeout_ms(),
             typing_delay_ms: default_typing_delay_ms(),
             notifications_enabled: true,
+            autostart_enabled: true,
             interaction: default_interaction(),
             usage_url: None,
         }

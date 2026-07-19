@@ -3,7 +3,7 @@
 use crate::config::Config;
 use crate::health::{HealthReport, Phase, ProbePayload};
 use crate::scheduler;
-use crate::usage::{UsageLogEntry, UsageProbePayload, UsageSnapshot};
+use crate::usage::{MetricSnapshot, UsageLogEntry, UsageProbePayload, UsageSnapshot};
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -223,10 +223,7 @@ impl AppState {
         let entry = match &result {
             Ok(snapshot) => UsageLogEntry {
                 ok: true,
-                detail: format!(
-                    "session {}% · weekly {}%",
-                    snapshot.session_percent, snapshot.weekly_percent
-                ),
+                detail: describe_usage(snapshot),
                 latency_ms,
                 at: Utc::now(),
             },
@@ -278,6 +275,26 @@ impl AppState {
             dashboard_visible: false,
         }
     }
+}
+
+/// A one-line summary of a successful usage check for the history log —
+/// each metric is described independently, since one can succeed while the
+/// other only has a percent (or is missing outright). Also used for the log
+/// line in `monitor::run_usage_check`, so both places agree on wording.
+pub(crate) fn describe_usage(snapshot: &UsageSnapshot) -> String {
+    [("session", &snapshot.session), ("weekly", &snapshot.weekly)]
+        .into_iter()
+        .map(|(label, metric)| match metric {
+            Some(MetricSnapshot {
+                percent,
+                reset_note: Some(_),
+                ..
+            }) => format!("{label} {percent}% (reset time unknown)"),
+            Some(MetricSnapshot { percent, .. }) => format!("{label} {percent}%"),
+            None => format!("{label} unavailable"),
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 #[cfg(test)]
@@ -514,10 +531,16 @@ mod tests {
         let s = state();
         let now = Utc::now();
         let snapshot = UsageSnapshot {
-            session_percent: 26,
-            session_reset_at: now,
-            weekly_percent: 40,
-            weekly_reset_at: now,
+            session: Some(MetricSnapshot {
+                percent: 26,
+                reset_at: Some(now),
+                reset_note: None,
+            }),
+            weekly: Some(MetricSnapshot {
+                percent: 40,
+                reset_at: Some(now),
+                reset_note: None,
+            }),
             fetched_at: now,
         };
 
@@ -534,10 +557,16 @@ mod tests {
         let s = state();
         let now = Utc::now();
         let snapshot = UsageSnapshot {
-            session_percent: 26,
-            session_reset_at: now,
-            weekly_percent: 40,
-            weekly_reset_at: now,
+            session: Some(MetricSnapshot {
+                percent: 26,
+                reset_at: Some(now),
+                reset_note: None,
+            }),
+            weekly: Some(MetricSnapshot {
+                percent: 40,
+                reset_at: Some(now),
+                reset_note: None,
+            }),
             fetched_at: now,
         };
         s.record_usage_result(Ok(snapshot.clone()), 500);
@@ -552,6 +581,50 @@ mod tests {
         let history = s.usage_history();
         assert_eq!(history.len(), 2, "both attempts are logged");
         assert!(!history[0].ok, "the newest entry is the failure");
+    }
+
+    #[test]
+    fn the_history_detail_describes_each_metric_independently() {
+        let s = state();
+        let now = Utc::now();
+        let snapshot = UsageSnapshot {
+            session: Some(MetricSnapshot {
+                percent: 26,
+                reset_at: Some(now),
+                reset_note: None,
+            }),
+            weekly: Some(MetricSnapshot {
+                percent: 40,
+                reset_at: None,
+                reset_note: Some("Resets Sun 7:00 AM".into()),
+            }),
+            fetched_at: now,
+        };
+
+        s.record_usage_result(Ok(snapshot), 500);
+
+        let detail = &s.usage_history()[0].detail;
+        assert!(detail.contains("session 26%"));
+        assert!(detail.contains("weekly 40% (reset time unknown)"));
+    }
+
+    #[test]
+    fn the_history_detail_flags_a_metric_that_could_not_be_scraped_at_all() {
+        let s = state();
+        let now = Utc::now();
+        let snapshot = UsageSnapshot {
+            session: Some(MetricSnapshot {
+                percent: 26,
+                reset_at: Some(now),
+                reset_note: None,
+            }),
+            weekly: None,
+            fetched_at: now,
+        };
+
+        s.record_usage_result(Ok(snapshot), 500);
+
+        assert!(s.usage_history()[0].detail.contains("weekly unavailable"));
     }
 
     #[test]

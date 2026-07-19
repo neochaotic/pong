@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { formatCountdown } from "./format";
+  import { formatHumanDuration } from "./format";
   import { barColor, isCritical } from "./usageColor";
-  import type { UsageLogEntry, UsageSnapshot } from "./types";
+  import type { MetricSnapshot, UsageLogEntry, UsageSnapshot } from "./types";
 
   let {
     usage,
@@ -34,15 +34,44 @@
     return () => clearInterval(timer);
   });
 
-  function secondsUntil(iso: string | undefined): number | null {
+  function secondsUntil(iso: string | null | undefined): number | null {
     if (!iso) return null;
     const target = Math.floor(new Date(iso).getTime() / 1000);
     return Number.isFinite(target) ? Math.max(0, target - nowSec) : null;
   }
-
-  const sessionRemaining = $derived(secondsUntil(usage?.session_reset_at));
-  const weeklyRemaining = $derived(secondsUntil(usage?.weekly_reset_at));
 </script>
+
+{#snippet metricRow(label: string, metric: MetricSnapshot | null, testid: string)}
+  <div class="flex flex-col gap-1" data-testid={testid}>
+    <div class="flex items-center justify-between font-mono text-[10px] text-fog">
+      <span>{label}</span>
+      {#if !metric}
+        <span data-testid="{testid}-unavailable">unavailable</span>
+      {:else if metric.reset_at}
+        <span>{metric.percent}% · resets in {formatHumanDuration(secondsUntil(metric.reset_at))}</span>
+      {:else}
+        <span title={metric.reset_note ?? undefined} data-testid="{testid}-reset-unknown">
+          {metric.percent}% · reset time unknown
+        </span>
+      {/if}
+    </div>
+    {#if metric}
+      <div
+        class="h-1.5 w-full overflow-hidden rounded-full bg-ink-800 transition-shadow
+               {isCritical(metric.percent)
+          ? 'animate-pulse ring-2 ring-danger ring-offset-1 ring-offset-ink-950'
+          : ''}"
+      >
+        <div
+          class="h-full rounded-full transition-all"
+          style="width: {Math.min(100, metric.percent)}%; background-color: {barColor(
+            metric.percent
+          )}"
+        ></div>
+      </div>
+    {/if}
+  </div>
+{/snippet}
 
 <div class="flex min-h-0 flex-1 flex-col gap-4" data-testid="usage-view">
   <div class="flex items-center justify-between">
@@ -98,45 +127,8 @@
           Last check failed: {lastUsageLog.detail} — showing the last known numbers.
         </p>
       {/if}
-      <div class="flex flex-col gap-1" data-testid="usage-session">
-        <div class="flex items-center justify-between font-mono text-[10px] text-fog">
-          <span>SESSION</span>
-          <span>{usage.session_percent}% · resets in {formatCountdown(sessionRemaining)}</span>
-        </div>
-        <div
-          class="h-1.5 w-full overflow-hidden rounded-full bg-ink-800 transition-shadow
-                 {isCritical(usage.session_percent)
-            ? 'animate-pulse ring-2 ring-danger ring-offset-1 ring-offset-ink-950'
-            : ''}"
-        >
-          <div
-            class="h-full rounded-full transition-all"
-            style="width: {Math.min(100, usage.session_percent)}%; background-color: {barColor(
-              usage.session_percent
-            )}"
-          ></div>
-        </div>
-      </div>
-
-      <div class="flex flex-col gap-1" data-testid="usage-weekly">
-        <div class="flex items-center justify-between font-mono text-[10px] text-fog">
-          <span>WEEKLY</span>
-          <span>{usage.weekly_percent}% · resets in {formatCountdown(weeklyRemaining)}</span>
-        </div>
-        <div
-          class="h-1.5 w-full overflow-hidden rounded-full bg-ink-800 transition-shadow
-                 {isCritical(usage.weekly_percent)
-            ? 'animate-pulse ring-2 ring-danger ring-offset-1 ring-offset-ink-950'
-            : ''}"
-        >
-          <div
-            class="h-full rounded-full transition-all"
-            style="width: {Math.min(100, usage.weekly_percent)}%; background-color: {barColor(
-              usage.weekly_percent
-            )}"
-          ></div>
-        </div>
-      </div>
+      {@render metricRow("SESSION", usage.session, "usage-session")}
+      {@render metricRow("WEEKLY", usage.weekly, "usage-weekly")}
     </div>
   {/if}
 </div>

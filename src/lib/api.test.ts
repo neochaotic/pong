@@ -35,7 +35,6 @@ describe("command wrappers", () => {
     ["openRelogin", "open_relogin"],
     ["closeRelogin", "close_relogin"],
     ["hidePopover", "hide_popover"],
-    ["quitApp", "quit_app"],
   ])("%s invokes the %s command", (fn, command) => {
     (api as unknown as Record<string, () => unknown>)[fn]();
     expect(invoke).toHaveBeenCalledWith(command);

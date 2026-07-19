@@ -18,7 +18,6 @@
     hidePopover,
     onSnapshot,
     openRelogin,
-    quitApp,
     toggleDashboard,
     clearSession,
     saveConfig,
@@ -344,8 +343,8 @@
         <span class="truncate font-mono text-[10px] text-fog">
           {snapshot ? shortenUrl(snapshot.target_url) : "—"}
         </span>
-        <button class="font-mono text-[10px] text-fog transition hover:text-danger" onclick={quitApp}>
-          QUIT
+        <button class="font-mono text-[10px] text-fog transition hover:text-chalk" onclick={hidePopover}>
+          CLOSE
         </button>
       </div>
     </footer>
@@ -375,10 +374,10 @@
                 {config?.usage_url ? shortenUrl(config.usage_url) : "—"}
               </span>
               <button
-                class="font-mono text-[10px] text-fog transition hover:text-danger"
-                onclick={quitApp}
+                class="font-mono text-[10px] text-fog transition hover:text-chalk"
+                onclick={hidePopover}
               >
-                QUIT
+                CLOSE
               </button>
             </div>
           </footer>
@@ -433,10 +432,10 @@
                 {snapshot ? shortenUrl(snapshot.target_url) : "—"}
               </span>
               <button
-                class="font-mono text-[10px] text-fog transition hover:text-danger"
-                onclick={quitApp}
+                class="font-mono text-[10px] text-fog transition hover:text-chalk"
+                onclick={hidePopover}
               >
-                QUIT
+                CLOSE
               </button>
             </div>
           </footer>

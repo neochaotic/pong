@@ -17,7 +17,6 @@ commands.allow = [
   "open_relogin",
   "close_relogin",
   "hide_popover",
-  "quit_app",
   "toggle_dashboard",
   "clear_session",
   "get_usage",

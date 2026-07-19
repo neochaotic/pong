@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_CRON, isCronShaped, toConfig, toForm, validateForm } from "./configForm";
+import {
+  DEFAULT_CRON,
+  expandFiveFieldCron,
+  isCronShaped,
+  toConfig,
+  toForm,
+  validateForm,
+} from "./configForm";
 import type { Config } from "./types";
 
 const config: Config = {
@@ -20,6 +27,7 @@ const config: Config = {
   typing_delay_ms: 60,
   element_timeout_ms: 10000,
   notifications_enabled: true,
+  autostart_enabled: true,
   interaction: "full",
   usage_url: null,
 };
@@ -32,6 +40,13 @@ describe("toForm / toConfig", () => {
   it("carries cron_enabled through the round trip in both states", () => {
     expect(toConfig(toForm({ ...config, cron_enabled: true })).cron_enabled).toBe(true);
     expect(toConfig(toForm({ ...config, cron_enabled: false })).cron_enabled).toBe(false);
+  });
+
+  it("carries autostart_enabled through the round trip in both states", () => {
+    expect(toConfig(toForm({ ...config, autostart_enabled: true })).autostart_enabled).toBe(true);
+    expect(toConfig(toForm({ ...config, autostart_enabled: false })).autostart_enabled).toBe(
+      false
+    );
   });
 
   it("represents a missing action button as an empty box", () => {
@@ -146,6 +161,28 @@ describe("isCronShaped", () => {
 
   it("rejects empty input", () => {
     expect(isCronShaped("")).toBe(false);
+  });
+});
+
+describe("expandFiveFieldCron", () => {
+  it("prepends seconds=0 to a classic 5-field cron", () => {
+    expect(expandFiveFieldCron("10 5 * * *")).toBe("0 10 5 * * *");
+  });
+
+  it("tolerates irregular spacing", () => {
+    expect(expandFiveFieldCron("  10   5 * * *  ")).toBe("0 10 5 * * *");
+  });
+
+  it("returns null for an already 6-field cron", () => {
+    expect(expandFiveFieldCron(DEFAULT_CRON)).toBeNull();
+  });
+
+  it("returns null for a 7-field cron", () => {
+    expect(expandFiveFieldCron("0 0 9 * * Mon 2026")).toBeNull();
+  });
+
+  it("returns null for empty input", () => {
+    expect(expandFiveFieldCron("")).toBeNull();
   });
 });
 

@@ -25,6 +25,7 @@ export interface FormState {
   cleanup_confirm_button: string;
   usage_url: string;
   notifications_enabled: boolean;
+  autostart_enabled: boolean;
   probe_only: boolean;
 }
 
@@ -56,6 +57,7 @@ export function toForm(config: Config): FormState {
     cleanup_confirm_button: config.cleanup.confirm_button ?? "",
     usage_url: config.usage_url ?? "",
     notifications_enabled: config.notifications_enabled,
+    autostart_enabled: config.autostart_enabled,
     probe_only: config.interaction === "probe_only",
   };
 }
@@ -87,6 +89,7 @@ export function toConfig(form: FormState): Config {
     },
     usage_url: form.usage_url.trim() === "" ? null : form.usage_url.trim(),
     notifications_enabled: form.notifications_enabled,
+    autostart_enabled: form.autostart_enabled,
     interaction: form.probe_only ? "probe_only" : "full",
   };
 }
@@ -95,6 +98,17 @@ export function toConfig(form: FormState): Config {
 export function isCronShaped(cron: string): boolean {
   const fields = cron.trim().split(/\s+/).filter(Boolean);
   return fields.length === 6 || fields.length === 7;
+}
+
+/**
+ * A classic 5-field cron (no seconds — `min hour dom month dow`) is a common
+ * slip for anyone used to standard cron syntax, not typo-grade garbage —
+ * worth fixing by prepending `0` for seconds rather than discarding what
+ * they typed. Returns `null` when the input isn't shaped like a 5-field cron.
+ */
+export function expandFiveFieldCron(cron: string): string | null {
+  const fields = cron.trim().split(/\s+/).filter(Boolean);
+  return fields.length === 5 ? `0 ${fields.join(" ")}` : null;
 }
 
 function isIntegerInRange(raw: string, max: number): boolean {

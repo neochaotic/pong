@@ -6,6 +6,11 @@ export default defineConfig({
   // Force the browser build of Svelte: the default server condition resolves
   // `mount()` to its SSR stub, which throws on render.
   resolve: { conditions: ["browser"] },
+  // Mirrors vite.config.ts's `__APP_VERSION__` — SettingsView.svelte reads it
+  // unconditionally, so it must exist under test too. The exact value
+  // (real version vs. tag) doesn't matter here; tests only check the string
+  // renders, not what it says.
+  define: { __APP_VERSION__: JSON.stringify("test") },
   test: {
     environment: "jsdom",
     globals: true,

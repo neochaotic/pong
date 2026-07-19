@@ -4,6 +4,7 @@ import {
   badgeTone,
   describeReport,
   formatCountdown,
+  formatHumanDuration,
   formatLatency,
   shortenUrl,
 } from "./format";
@@ -35,6 +36,37 @@ describe("formatCountdown", () => {
   it("renders a placeholder when the schedule is unknown", () => {
     expect(formatCountdown(null)).toBe("--:--");
     expect(formatCountdown(Number.NaN)).toBe("--:--");
+  });
+});
+
+describe("formatHumanDuration", () => {
+  it("shows minutes only under an hour", () => {
+    expect(formatHumanDuration(45 * 60)).toBe("45min");
+    expect(formatHumanDuration(5 * 60 + 10)).toBe("5min");
+  });
+
+  it("shows hours, with minutes only when there's a remainder", () => {
+    expect(formatHumanDuration(3 * 3600)).toBe("3h");
+    expect(formatHumanDuration(3 * 3600 + 20 * 60)).toBe("3h 20min");
+  });
+
+  it("shows days, with hours only when there's a remainder", () => {
+    expect(formatHumanDuration(2 * 86400)).toBe("2d");
+    expect(formatHumanDuration(2 * 86400 + 5 * 3600)).toBe("2d 5h");
+  });
+
+  it("floors under a minute to a friendly placeholder", () => {
+    expect(formatHumanDuration(30)).toBe("< 1 min");
+    expect(formatHumanDuration(0)).toBe("< 1 min");
+  });
+
+  it("clamps negatives to zero", () => {
+    expect(formatHumanDuration(-30)).toBe("< 1 min");
+  });
+
+  it("renders a placeholder when unknown", () => {
+    expect(formatHumanDuration(null)).toBe("unknown");
+    expect(formatHumanDuration(Number.NaN)).toBe("unknown");
   });
 });
 

@@ -44,16 +44,27 @@ export interface Config {
   typing_delay_ms: number;
   element_timeout_ms: number;
   notifications_enabled: boolean;
+  autostart_enabled: boolean;
   interaction: Interaction;
   usage_url: string | null;
 }
 
-/** Mirrors `usage::UsageSnapshot`. */
+/** Mirrors `usage::MetricSnapshot`. */
+export interface MetricSnapshot {
+  percent: number;
+  /** `null` when the percent was scraped but the reset text couldn't be parsed. */
+  reset_at: string | null;
+  /** Raw reset text, set only when `reset_at` is null because parsing failed. */
+  reset_note: string | null;
+}
+
+/**
+ * Mirrors `usage::UsageSnapshot`. Session and weekly are independent — one
+ * metric missing or lacking a reset time never blanks the other.
+ */
 export interface UsageSnapshot {
-  session_percent: number;
-  session_reset_at: string;
-  weekly_percent: number;
-  weekly_reset_at: string;
+  session: MetricSnapshot | null;
+  weekly: MetricSnapshot | null;
   fetched_at: string;
 }
 

@@ -22,6 +22,7 @@ use crate::state::{AppState, MonitorSnapshot};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_autostart::ManagerExt;
 use tokio_cron_scheduler::{Job, JobScheduler};
 
 /// How often the tray tooltip / popover countdown is refreshed from Rust.
@@ -265,6 +266,10 @@ async fn save_config(
         }
     }
 
+    if previous.autostart_enabled != config.autostart_enabled {
+        sync_autostart(&app, config.autostart_enabled);
+    }
+
     monitor::emit_snapshot(&app, &state);
     Ok(state.snapshot())
 }
@@ -361,11 +366,6 @@ fn hide_popover(app: tauri::AppHandle) {
     }
 }
 
-#[tauri::command]
-fn quit_app(app: tauri::AppHandle) {
-    app.exit(0);
-}
-
 // ---------------------------------------------------------------------- setup
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -385,6 +385,10 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
             get_config,
@@ -399,7 +403,6 @@ pub fn run() {
             open_relogin,
             close_relogin,
             hide_popover,
-            quit_app,
             toggle_dashboard,
             clear_session,
         ])
@@ -420,6 +423,12 @@ pub fn run() {
             let state = Arc::new(AppState::new(config.clone(), config_path));
             app.manage(state.clone());
             app.manage(CronHandle::default());
+
+            // A tray-resident monitor that doesn't come back after a reboot
+            // mostly defeats the point — sync the OS registration to match
+            // the user's preference on every launch, in case it drifted
+            // (e.g. the user removed the login item by hand).
+            sync_autostart(&handle, config.autostart_enabled);
 
             #[cfg(target_os = "macos")]
             build_app_menu(&handle)?;
@@ -445,6 +454,26 @@ pub fn run() {
                 }
             }
         });
+}
+
+/// Reconciles the OS's actual login-item registration with `enabled`.
+///
+/// Idempotent and cheap enough to call on every launch and every settings
+/// save: it only touches the registration when it disagrees with the
+/// desired state, so it also self-heals if the user removed the login item
+/// by hand outside of Pong.
+fn sync_autostart(app: &tauri::AppHandle, enabled: bool) {
+    let autostart = app.autolaunch();
+    let is_enabled = autostart.is_enabled().unwrap_or(false);
+    if enabled && !is_enabled {
+        if let Err(e) = autostart.enable() {
+            log::warn!("failed to enable autostart: {e}");
+        }
+    } else if !enabled && is_enabled {
+        if let Err(e) = autostart.disable() {
+            log::warn!("failed to disable autostart: {e}");
+        }
+    }
 }
 
 /// The macOS application menu.

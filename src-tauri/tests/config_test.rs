@@ -57,6 +57,21 @@ fn cron_enabled_can_be_configured() {
 }
 
 #[test]
+fn autostart_is_enabled_by_default() {
+    // A tray-resident monitor that doesn't come back after a reboot without
+    // the user remembering to relaunch it mostly defeats the point.
+    let cfg = Config::from_json("{}").unwrap();
+    assert!(cfg.autostart_enabled);
+}
+
+#[test]
+fn autostart_can_be_disabled() {
+    let raw = r##"{"autostart_enabled": false}"##;
+    let cfg = Config::from_json(raw).unwrap();
+    assert!(!cfg.autostart_enabled);
+}
+
+#[test]
 fn defaults_to_probe_only_so_a_fresh_install_never_types() {
     // The default target is a real account. Typing into it on a schedule could
     // post a comment or submit a form once per cron tick, forever.

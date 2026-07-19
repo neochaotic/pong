@@ -1,5 +1,12 @@
 <script lang="ts">
-  import { DEFAULT_CRON, toConfig, toForm, validateForm, type FormState } from "./configForm";
+  import {
+    DEFAULT_CRON,
+    expandFiveFieldCron,
+    toConfig,
+    toForm,
+    validateForm,
+    type FormState,
+  } from "./configForm";
   import Toggle from "./Toggle.svelte";
   import type { Config } from "./types";
 
@@ -48,6 +55,11 @@
   }
 
   async function save() {
+    // A classic 5-field cron (crontab.guru style, no seconds) is valid intent,
+    // not a typo — complete it with seconds=0 before validating.
+    const expanded = expandFiveFieldCron(form.cron);
+    if (expanded) form.cron = expanded;
+
     // Validate locally first so typos never cost a round trip.
     errors = validateForm(form);
     if (errors.length > 0) {
@@ -220,6 +232,14 @@
   <span class="{sectionTitle} border-t border-line pt-3">PREFERENCES</span>
 
   <Toggle
+    testid="field-autostart_enabled"
+    checked={form.autostart_enabled}
+    onChange={(v) => (form.autostart_enabled = v)}
+    label="LAUNCH AT LOGIN"
+    hint="A tray monitor that doesn't come back on its own isn't much of a monitor."
+  />
+
+  <Toggle
     testid="field-notifications"
     checked={form.notifications_enabled}
     onChange={(v) => (form.notifications_enabled = v)}
@@ -260,6 +280,10 @@
       </button>
     {/if}
   </div>
+
+  <p class="text-center font-mono text-[9px] text-fog/70" data-testid="app-version">
+    Pong v{__APP_VERSION__}
+  </p>
 
   {#if errors.length > 0}
     <ul class="flex flex-col gap-0.5" data-testid="form-errors">

@@ -18,7 +18,6 @@ const api = {
   openRelogin: vi.fn(),
   closeRelogin: vi.fn(),
   hidePopover: vi.fn(),
-  quitApp: vi.fn(),
   resizePopover: vi.fn(),
   toggleDashboard: vi.fn(),
   clearSession: vi.fn(),
@@ -50,10 +49,16 @@ const snapshot = (over: Partial<MonitorSnapshot> = {}): MonitorSnapshot => ({
 });
 
 const usageSnapshot = (over: Partial<UsageSnapshot> = {}): UsageSnapshot => ({
-  session_percent: 26,
-  session_reset_at: new Date(Date.now() + 3 * 3600_000).toISOString(),
-  weekly_percent: 40,
-  weekly_reset_at: new Date(Date.now() + 7 * 3600_000).toISOString(),
+  session: {
+    percent: 26,
+    reset_at: new Date(Date.now() + 3 * 3600_000).toISOString(),
+    reset_note: null,
+  },
+  weekly: {
+    percent: 40,
+    reset_at: new Date(Date.now() + 7 * 3600_000).toISOString(),
+    reset_note: null,
+  },
   fetched_at: new Date().toISOString(),
   ...over,
 });
@@ -83,6 +88,7 @@ beforeEach(() => {
     typing_delay_ms: 60,
     element_timeout_ms: 10000,
     notifications_enabled: true,
+    autostart_enabled: true,
     interaction: "full",
     usage_url: null,
   });
@@ -130,6 +136,7 @@ describe("dash tab (default view)", () => {
       typing_delay_ms: 60,
       element_timeout_ms: 10000,
       notifications_enabled: true,
+      autostart_enabled: true,
       interaction: "full",
       usage_url: "https://dash.internal/usage",
     });
@@ -161,6 +168,7 @@ describe("dash tab (default view)", () => {
       typing_delay_ms: 60,
       element_timeout_ms: 10000,
       notifications_enabled: true,
+      autostart_enabled: true,
       interaction: "full",
       usage_url: "https://dash.internal/usage",
     });
@@ -188,13 +196,13 @@ describe("dash tab (default view)", () => {
     expect(await screen.findByRole("button", { name: "Hide login" })).toBeInTheDocument();
   });
 
-  it("quits when QUIT is pressed", async () => {
+  it("hides the popover, rather than quitting, when CLOSE is pressed", async () => {
     render(App);
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole("button", { name: "QUIT" }));
+    await user.click(await screen.findByRole("button", { name: "CLOSE" }));
 
-    expect(api.quitApp).toHaveBeenCalledOnce();
+    expect(api.hidePopover).toHaveBeenCalledOnce();
   });
 
   it("fetches usage on mount and renders the percentages", async () => {
@@ -216,14 +224,80 @@ describe("dash tab (default view)", () => {
       typing_delay_ms: 60,
       element_timeout_ms: 10000,
       notifications_enabled: true,
+      autostart_enabled: true,
       interaction: "full",
       usage_url: "https://dash.internal/usage",
     });
     api.getUsage.mockResolvedValue(usageSnapshot());
     render(App);
 
-    expect(await screen.findByText("26% · resets in 3:00:00")).toBeInTheDocument();
-    expect(await screen.findByText("40% · resets in 7:00:00")).toBeInTheDocument();
+    expect(await screen.findByText("26% · resets in 3h")).toBeInTheDocument();
+    expect(await screen.findByText("40% · resets in 7h")).toBeInTheDocument();
+  });
+
+  it("shows a scraped metric even when the other metric could not be read at all", async () => {
+    api.getConfig.mockResolvedValue({
+      target_url: "https://dash.internal/login",
+      cron: "0 0 5 * * Mon-Fri",
+      cron_enabled: false,
+      selectors: {
+        authenticated: "#main",
+        login_indicator: "#login",
+        action_button: null,
+        text_input: "textarea",
+        submit_button: null,
+        response: null,
+      },
+      cleanup: { menu_button: null, delete_option: null, confirm_button: null },
+      payload: "ping",
+      settle_ms: 3000,
+      typing_delay_ms: 60,
+      element_timeout_ms: 10000,
+      notifications_enabled: true,
+      autostart_enabled: true,
+      interaction: "full",
+      usage_url: "https://dash.internal/usage",
+    });
+    api.getUsage.mockResolvedValue(usageSnapshot({ weekly: null }));
+    render(App);
+
+    expect(await screen.findByText("26% · resets in 3h")).toBeInTheDocument();
+    expect(await screen.findByTestId("usage-weekly-unavailable")).toBeInTheDocument();
+  });
+
+  it("shows a known percent with an unknown reset time instead of discarding the metric", async () => {
+    api.getConfig.mockResolvedValue({
+      target_url: "https://dash.internal/login",
+      cron: "0 0 5 * * Mon-Fri",
+      cron_enabled: false,
+      selectors: {
+        authenticated: "#main",
+        login_indicator: "#login",
+        action_button: null,
+        text_input: "textarea",
+        submit_button: null,
+        response: null,
+      },
+      cleanup: { menu_button: null, delete_option: null, confirm_button: null },
+      payload: "ping",
+      settle_ms: 3000,
+      typing_delay_ms: 60,
+      element_timeout_ms: 10000,
+      notifications_enabled: true,
+      autostart_enabled: true,
+      interaction: "full",
+      usage_url: "https://dash.internal/usage",
+    });
+    api.getUsage.mockResolvedValue(
+      usageSnapshot({
+        weekly: { percent: 40, reset_at: null, reset_note: "Resets Sun 7:00 AM" },
+      })
+    );
+    render(App);
+
+    expect(await screen.findByTestId("usage-weekly-reset-unknown")).toHaveTextContent(
+      "40% · reset time unknown"
+    );
   });
 
   it("refreshes usage when the refresh button is pressed", async () => {
@@ -267,6 +341,7 @@ describe("monitor tab", () => {
       typing_delay_ms: 60,
       element_timeout_ms: 10000,
       notifications_enabled: true,
+      autostart_enabled: true,
       interaction: "full",
       usage_url: null,
     });

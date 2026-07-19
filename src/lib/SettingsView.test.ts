@@ -22,6 +22,7 @@ const config: Config = {
   typing_delay_ms: 60,
   element_timeout_ms: 10000,
   notifications_enabled: true,
+  autostart_enabled: true,
   interaction: "full",
   usage_url: null,
 };
@@ -80,11 +81,22 @@ describe("SettingsView", () => {
     );
   });
 
-  it("blocks a 5-field cron before touching the backend", async () => {
+  it("auto-expands a classic 5-field cron with seconds=0 and saves it", async () => {
     const { onSave, user } = setup();
 
     await user.clear(field("cron"));
-    await user.type(field("cron"), "*/5 * * * *");
+    await user.type(field("cron"), "10 5 * * *");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSave.mock.calls[0][0].cron).toBe("0 10 5 * * *");
+    expect(field("cron")).toHaveValue("0 10 5 * * *");
+  });
+
+  it("blocks a cron with the wrong field count before touching the backend", async () => {
+    const { onSave, user } = setup();
+
+    await user.clear(field("cron"));
+    await user.type(field("cron"), "* * *");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(onSave).not.toHaveBeenCalled();
@@ -110,6 +122,15 @@ describe("SettingsView", () => {
     expect(onSave.mock.calls[0][0].interaction).toBe("probe_only");
   });
 
+  it("toggles launch-at-login off", async () => {
+    const { onSave, user } = setup();
+
+    await user.click(screen.getByTestId("field-autostart_enabled"));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSave.mock.calls[0][0].autostart_enabled).toBe(false);
+  });
+
   it("toggles the cron schedule on", async () => {
     const { onSave, user } = setup();
 
@@ -132,7 +153,7 @@ describe("SettingsView", () => {
     const { onSave, user } = setup();
 
     await user.clear(field("cron"));
-    await user.type(field("cron"), "*/5 * * * *");
+    await user.type(field("cron"), "* * *");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(onSave).not.toHaveBeenCalled();
@@ -186,5 +207,11 @@ describe("SettingsView", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(onSave.mock.calls[0][0].selectors.action_button).toBeNull();
+  });
+
+  it("shows the running app version, so a tester can tell which build they're on", () => {
+    setup();
+
+    expect(screen.getByTestId("app-version")).toHaveTextContent("Pong v");
   });
 });

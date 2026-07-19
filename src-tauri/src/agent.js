@@ -507,10 +507,18 @@
         if (post.code === 401) return done(401, "session expired during check");
         if (post.code !== 200) return done(503, post.detail);
 
+        // Each stage below gets its own full `timeout`, not a shrinking
+        // remainder of one shared budget — `check_budget` on the Rust side
+        // already reserves one independent `element_timeout_ms` pass per
+        // stage (text input, response, and each cleanup step) for exactly
+        // this reason. A shared, decreasing budget starves whichever stage
+        // runs last — usually cleanup — whenever an earlier stage (most
+        // often waiting for the reply) eats into it, and can even go
+        // negative, which `setTimeout` silently treats as zero instead of
+        // erroring, so the starved stage fails near-instantly.
         var detail = "dashboard responded";
         if (p.selectors.response) {
-          var remaining = timeout - (performance.now() - started);
-          var reply = await waitForStableText(p.selectors.response, remaining);
+          var reply = await waitForStableText(p.selectors.response, timeout);
           detail = reply
             ? reply.length > 300
               ? reply.slice(0, 300) + "…"
@@ -519,8 +527,7 @@
         }
 
         if (p.cleanup && (p.cleanup.menu_button || p.cleanup.delete_option || p.cleanup.confirm_button)) {
-          var remainingForCleanup = timeout - (performance.now() - started);
-          detail += " · " + (await runCleanup(p.cleanup, remainingForCleanup));
+          detail += " · " + (await runCleanup(p.cleanup, timeout));
         }
 
         return done(200, detail);

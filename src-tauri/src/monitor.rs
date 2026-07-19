@@ -208,9 +208,8 @@ pub async fn run_usage_check(app: AppHandle, state: Arc<AppState>) {
         ScrapeOutcome::Done(result) => {
             match &result {
                 Ok(snapshot) => log::info!(
-                    "usage check finished: session {}% weekly {}% ({}ms)",
-                    snapshot.session_percent,
-                    snapshot.weekly_percent,
+                    "usage check finished: {} ({}ms)",
+                    crate::state::describe_usage(snapshot),
                     latency_ms
                 ),
                 Err(reason) => log::warn!("usage check failed: {reason} ({latency_ms}ms)"),
@@ -520,15 +519,35 @@ mod tests {
 
         match interpret_usage_payload(payload, Utc::now()) {
             ScrapeOutcome::Done(Ok(snapshot)) => {
-                assert_eq!(snapshot.session_percent, 26);
-                assert_eq!(snapshot.weekly_percent, 40);
+                assert_eq!(snapshot.session.unwrap().percent, 26);
+                assert_eq!(snapshot.weekly.unwrap().percent, 40);
             }
             other => panic!("expected a resolved snapshot, got {other:?}"),
         }
     }
 
     #[test]
-    fn a_partial_payload_that_is_not_logged_out_still_fails_closed() {
+    fn one_metric_missing_still_resolves_to_a_snapshot_with_the_other() {
+        let payload = usage_payload(UsageProbePayload {
+            logged_out: false,
+            session_percent: Some(26),
+            session_reset_text: Some("Resets in 3 hr 43 min".into()),
+            weekly_percent: None,
+            weekly_reset_text: None,
+            nonce: 1,
+        });
+
+        match interpret_usage_payload(payload, Utc::now()) {
+            ScrapeOutcome::Done(Ok(snapshot)) => {
+                assert_eq!(snapshot.session.unwrap().percent, 26);
+                assert!(snapshot.weekly.is_none());
+            }
+            other => panic!("expected a partial snapshot, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_payload_with_neither_metric_scraped_and_not_logged_out_still_fails_closed() {
         let payload = usage_payload(UsageProbePayload {
             logged_out: false,
             session_percent: None,

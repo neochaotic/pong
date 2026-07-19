@@ -25,7 +25,6 @@ export const toggleDashboard = () => invoke<boolean>("toggle_dashboard");
 export const clearSession = () => invoke<MonitorSnapshot>("clear_session");
 export const closeRelogin = () => invoke<void>("close_relogin");
 export const hidePopover = () => invoke<void>("hide_popover");
-export const quitApp = () => invoke<void>("quit_app");
 
 /** The most recently scraped claude.ai usage panel, if any. */
 export const getUsage = () => invoke<UsageSnapshot | null>("get_usage");
