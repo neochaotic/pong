@@ -1,6 +1,6 @@
 ---
 title: "Pong v0.0.1: a tray watchdog that keeps your Claude session warm before you sit down"
-published: false
+published: true
 description: "Pong just shipped v0.0.1 — a lightweight menu-bar app (Tauri + Rust) that pre-warms your Claude session on a schedule, shows a live usage dashboard with a real-time reset countdown, and runs a synthetic health check instead of a ping. Here's the productivity case for it."
 tags: productivity, rust, opensource, ai
 cover_image: https://raw.githubusercontent.com/neochaotic/pong/main/docs/screenshots/dash-normal.png
