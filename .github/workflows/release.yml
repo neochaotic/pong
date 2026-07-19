@@ -80,22 +80,36 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "Pong ${{ github.ref_name }}"
           releaseBody: |
-            Cross-platform installers are attached below.
+            **Pong** is a menu-bar companion for people who live inside Claude.ai all day: a live
+            usage dashboard with a real-time reset countdown, a scheduled session warm-up so the
+            login screen is never what's waiting for you, and health checks that actually check
+            health — a synthetic transaction, not a ping. Full rundown in the
+            [README](https://github.com/neochaotic/pong#readme).
 
-            | Platform | File |
-            | --- | --- |
-            | macOS (Apple Silicon) | `.dmg` — aarch64 |
-            | macOS (Intel) | `.dmg` — x64 |
-            | Windows | `.msi` / `.exe` |
-            | Linux (any distro) | `.AppImage` — portable, no install |
-            | Debian / Ubuntu | `.deb` |
-            | Fedora / RHEL / openSUSE | `.rpm` |
+            ### Install
+
+            | Platform | File | Notes |
+            | --- | --- | --- |
+            | macOS (Apple Silicon) | `.dmg` — aarch64 | drag to Applications |
+            | macOS (Intel) | `.dmg` — x64 | drag to Applications |
+            | Windows | `.msi` / `.exe` | `.msi` for managed installs |
+            | Linux (any distro) | `.AppImage` | portable; `chmod +x` and run, no install |
+            | Debian / Ubuntu | `.deb` | `sudo apt install ./Pong_*.deb` |
+            | Fedora / RHEL / openSUSE | `.rpm` | `sudo dnf install ./Pong-*.rpm` |
 
             **These builds are not code-signed.** macOS will refuse the first
             launch: right-click the app → *Open* → *Open*, or run
             `xattr -cr /Applications/Pong.app`. Windows SmartScreen will warn:
             *More info* → *Run anyway*. Signing requires a paid Apple Developer
             account and a Windows code-signing certificate.
+
+            ### Before you file an issue
+
+            Check the README's [Known issues](https://github.com/neochaotic/pong#known-issues-this-rc)
+            section first — Windows/Linux popover rendering, tray icon coloring, and Google/passkey
+            sign-in are documented limitations of the underlying webview, not surprises. Otherwise,
+            [open an issue](https://github.com/neochaotic/pong/issues/new) with your OS and, if
+            relevant, the log file (README → [Logs](https://github.com/neochaotic/pong#logs)).
           releaseDraft: true
           # Any tag carrying a suffix (v0.0.1-rc.1, -alpha.1, -beta.2) is flagged
           # as a pre-release, so it never shows up as "Latest release".
