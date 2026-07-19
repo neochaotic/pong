@@ -81,13 +81,29 @@ open the app for the first time, not after:
 - **macOS**: a plain double-click will silently fail — Gatekeeper blocks the launch *before the
   process starts*, and because Pong is a menu-bar-only app (no Dock icon, no window), nothing
   visibly happens. No crash dialog, no bounce, nothing. It looks exactly like the install did
-  nothing, even though it worked. Fix it with one of:
+  nothing, even though it worked. Sometimes, instead of that silent failure, you get an explicit
+  **"Pong.app is damaged and can't be opened"** dialog telling you to move it to the Trash — same
+  root cause (unsigned + quarantined), just a scarier, more misleading message. **The app is not
+  actually damaged; do not trash it.** Fix either case with one of:
   - Right-click the app → *Open* → *Open* (do this once; normal double-clicks work afterward), or
-  - `xattr -cr /Applications/Pong.app`
+  - Terminal: `xattr -cr /Applications/Pong.app && open /Applications/Pong.app`
 - **Windows**: SmartScreen shows a warning — *More info* → *Run anyway*.
 
 If you've done this and still don't see the tray icon, that's a real bug — please
 [open an issue](https://github.com/neochaotic/pong/issues/new).
+
+### Updating: quit Pong before you reinstall
+
+Dragging a new `.dmg` over an existing install just replaces files on disk — Finder's "replace?"
+prompt has no way to signal a process that's already running, and Pong being tray-only (no Dock
+icon) means there's nothing to bounce or close for you. The **old process keeps running**,
+completely unaffected, and the version string in Settings (baked in at build time) keeps showing
+the version it was launched with. It looks like the update silently did nothing; it actually
+installed fine, you're just still looking at the old process.
+
+Quit Pong first — tray icon → *Quit* (or `killall pongllm`) — *then* replace and reopen. Verified
+on macOS; the same applies in principle on Windows/Linux, since none of the three installers
+coordinate with a running instance either.
 
 ### Uninstalling
 
