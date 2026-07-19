@@ -62,6 +62,8 @@ opens a window. See [Fields](#fields).
 
 ## Install
 
+*Full walkthrough with the "damaged" dialog mockup and every fix: [docs/installing.md](docs/installing.md).*
+
 **macOS — Homebrew (recommended):**
 
 ```bash
