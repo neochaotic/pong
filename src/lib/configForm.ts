@@ -37,6 +37,34 @@ export const MAX_ELEMENT_TIMEOUT_MS = 120_000;
 /** Mirrors `config::default_cron` — 5am, Monday through Friday. */
 export const DEFAULT_CRON = "0 0 5 * * Mon-Fri";
 
+/**
+ * Mirrors `Config::default()` in `config.rs` field-for-field — a real login
+ * page (GitHub's) and `probe_only`, so "Restore defaults" hands back
+ * something a fresh install would actually ship with, not an empty form.
+ */
+export const DEFAULT_CONFIG: Config = {
+  target_url: "https://github.com/login",
+  cron: DEFAULT_CRON,
+  cron_enabled: false,
+  selectors: {
+    authenticated: 'meta[name="user-login"]',
+    login_indicator: "input[type=password]",
+    action_button: null,
+    text_input: 'textarea, div[contenteditable="true"]',
+    submit_button: null,
+    response: null,
+  },
+  cleanup: { menu_button: null, delete_option: null, confirm_button: null },
+  payload: "ping",
+  settle_ms: 3_000,
+  typing_delay_ms: 60,
+  element_timeout_ms: 10_000,
+  notifications_enabled: true,
+  autostart_enabled: true,
+  interaction: "probe_only",
+  usage_url: null,
+};
+
 export function toForm(config: Config): FormState {
   return {
     target_url: config.target_url,
@@ -60,6 +88,12 @@ export function toForm(config: Config): FormState {
     autostart_enabled: config.autostart_enabled,
     probe_only: config.interaction === "probe_only",
   };
+}
+
+/** The form state "Restore defaults" hands back — `toForm(DEFAULT_CONFIG)`,
+ * kept as its own export so callers don't need to know that's how it's built. */
+export function defaultForm(): FormState {
+  return toForm(DEFAULT_CONFIG);
 }
 
 export function toConfig(form: FormState): Config {

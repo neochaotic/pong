@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     DEFAULT_CRON,
+    defaultForm,
     expandFiveFieldCron,
     toConfig,
     toForm,
@@ -36,6 +37,10 @@
   // there is no undo.
   let confirmingWipe = $state(false);
   let wiping = $state(false);
+  // Two-step for the same reason: overwrites every field in the form with
+  // no undo. Unlike wiping the session, this never touches the backend by
+  // itself — it only fills the form. Nothing is persisted until Save.
+  let confirmingRestore = $state(false);
 
   async function clearSession() {
     if (!confirmingWipe) {
@@ -47,6 +52,16 @@
     wiping = false;
     confirmingWipe = false;
     if (failure) errors = [failure];
+  }
+
+  function restoreDefaults() {
+    if (!confirmingRestore) {
+      confirmingRestore = true;
+      return;
+    }
+    form = defaultForm();
+    errors = [];
+    confirmingRestore = false;
   }
 
   /** A cron-shaped complaint from either validator, lower-cased for matching. */
@@ -253,6 +268,31 @@
     label="PROBE ONLY"
     hint="Check the session without clicking or typing."
   />
+
+  <div class="flex flex-col gap-1 border-t border-line pt-3">
+    <span class={sectionTitle}>CONFIGURATION</span>
+    <button
+      data-testid="restore-defaults"
+      class="rounded-md border px-2 py-1.5 text-[11px] transition
+             {confirmingRestore
+        ? 'border-danger bg-danger/10 text-danger'
+        : 'border-line bg-ink-900 text-fog hover:text-chalk'}"
+      onclick={restoreDefaults}
+    >
+      {confirmingRestore ? "Confirm — discards every field below" : "Restore defaults"}
+    </button>
+    {#if confirmingRestore}
+      <button
+        class="self-start font-mono text-[9px] text-fog underline"
+        onclick={() => (confirmingRestore = false)}
+      >
+        cancel
+      </button>
+    {/if}
+    <span class="font-mono text-[9px] leading-snug text-fog">
+      Fills the form with defaults — nothing is saved until you click Save.
+    </span>
+  </div>
 
   <div class="flex flex-col gap-1 border-t border-line pt-3">
     <span class={sectionTitle}>SESSION</span>
