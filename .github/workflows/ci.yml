@@ -18,10 +18,10 @@ jobs:
     name: Frontend
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with: { version: 10 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: 22, cache: pnpm }
 
       - run: pnpm install --frozen-lockfile
@@ -35,7 +35,7 @@ jobs:
     name: Rust lint + coverage
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux webview dependencies
         run: |
@@ -50,9 +50,9 @@ jobs:
       - uses: taiki-e/install-action@cargo-llvm-cov
 
       # tauri-build embeds ../dist at compile time, so the frontend must exist.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with: { version: 10 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
@@ -91,7 +91,7 @@ jobs:
             label: Windows
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux webview dependencies
         if: runner.os == 'Linux'
@@ -106,9 +106,9 @@ jobs:
           workspaces: src-tauri
           key: ${{ matrix.platform }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with: { version: 10 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
@@ -134,7 +134,7 @@ jobs:
             label: Windows
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux webview dependencies
         if: runner.os == 'Linux'
@@ -149,9 +149,9 @@ jobs:
           workspaces: src-tauri
           key: bundle-${{ matrix.platform }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with: { version: 10 }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
 
@@ -191,7 +191,7 @@ jobs:
               (expected on a headless runner without a tray)"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: installers-${{ matrix.label }}
           retention-days: 7
