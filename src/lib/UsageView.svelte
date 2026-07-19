@@ -1,5 +1,6 @@
 <script lang="ts">
   import { formatCountdown } from "./format";
+  import { barColor, isCritical } from "./usageColor";
   import type { UsageLogEntry, UsageSnapshot } from "./types";
 
   let {
@@ -41,14 +42,6 @@
 
   const sessionRemaining = $derived(secondsUntil(usage?.session_reset_at));
   const weeklyRemaining = $derived(secondsUntil(usage?.weekly_reset_at));
-
-  // Same red/yellow/green semantics as the rest of the app (StatusBadge),
-  // not the brand accent — this is a health signal, not a decoration.
-  function barTone(percent: number): string {
-    if (percent >= 90) return "bg-danger";
-    if (percent >= 70) return "bg-warn";
-    return "bg-ok";
-  }
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col gap-4" data-testid="usage-view">
@@ -110,10 +103,17 @@
           <span>SESSION</span>
           <span>{usage.session_percent}% · resets in {formatCountdown(sessionRemaining)}</span>
         </div>
-        <div class="h-1.5 w-full overflow-hidden rounded-full bg-ink-800">
+        <div
+          class="h-1.5 w-full overflow-hidden rounded-full bg-ink-800 transition-shadow
+                 {isCritical(usage.session_percent)
+            ? 'animate-pulse ring-2 ring-danger ring-offset-1 ring-offset-ink-950'
+            : ''}"
+        >
           <div
-            class="h-full rounded-full transition-all {barTone(usage.session_percent)}"
-            style="width: {Math.min(100, usage.session_percent)}%"
+            class="h-full rounded-full transition-all"
+            style="width: {Math.min(100, usage.session_percent)}%; background-color: {barColor(
+              usage.session_percent
+            )}"
           ></div>
         </div>
       </div>
@@ -123,10 +123,17 @@
           <span>WEEKLY</span>
           <span>{usage.weekly_percent}% · resets in {formatCountdown(weeklyRemaining)}</span>
         </div>
-        <div class="h-1.5 w-full overflow-hidden rounded-full bg-ink-800">
+        <div
+          class="h-1.5 w-full overflow-hidden rounded-full bg-ink-800 transition-shadow
+                 {isCritical(usage.weekly_percent)
+            ? 'animate-pulse ring-2 ring-danger ring-offset-1 ring-offset-ink-950'
+            : ''}"
+        >
           <div
-            class="h-full rounded-full transition-all {barTone(usage.weekly_percent)}"
-            style="width: {Math.min(100, usage.weekly_percent)}%"
+            class="h-full rounded-full transition-all"
+            style="width: {Math.min(100, usage.weekly_percent)}%; background-color: {barColor(
+              usage.weekly_percent
+            )}"
           ></div>
         </div>
       </div>
