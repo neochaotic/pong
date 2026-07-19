@@ -26,7 +26,8 @@ afford it:
 - **📊 A live usage dashboard.** Session and weekly consumption, with the reset countdown ticking
   in real time — so "am I about to get throttled?" is a glance, not a tab switch.
 - **🔥 Session warm-up.** On a schedule you control, Pong quietly drives the dashboard the way you
-  would — so the login screen is never what's waiting for you when you sit down to work.
+  would — so the login screen is never what's waiting for you when you sit down to work. Timed right,
+  it also shifts *when* your usage window opens — see [below](#timing-the-warm-up).
 - **🩺 A health check that actually checks health.** Not a ping: a synthetic transaction. It types,
   submits, and confirms the app responded, catching a silently broken session before you do.
 
@@ -34,6 +35,30 @@ Under the hood, it drives a hidden webview through a real login session and eval
 JavaScript against the live DOM — the same page, the same cookies, the same path a human takes.
 Whatever it finds, it surfaces in one popover: usage, uptime, and a history of both, without ever
 leaving your keyboard.
+
+<p align="center">
+  <img src="docs/screenshots/dash-normal.png" width="230" alt="The usage dashboard with comfortable session and weekly consumption">
+  <img src="docs/screenshots/dash-critical.png" width="230" alt="The usage dashboard with the session bar pulsing red near the limit">
+  <img src="docs/screenshots/monitor-tab.png" width="230" alt="The PONG tab, counting down to the next scheduled check">
+</p>
+
+### Timing the warm-up
+
+Claude's usage limits run on a rolling session window — five hours is typical — that starts the moment
+you send your *first* message, not at a fixed clock time. If you tend to burn through a session fast
+(two focused hours, say) and then have to sit out the rest of the window before a new one opens, that
+wait tends to land exactly when you'd otherwise keep working.
+
+A scheduled warm-up can turn that into a non-issue, because it's a real message too — it opens a window
+just like any other. Schedule one for a time you aren't using Claude anyway, say 5am, and the window
+opens then, not when you actually sit down. Start real work at 8am and you're already three hours into
+that window: two hours of headroom left before it rolls over at 10am into a *fresh* five-hour window —
+one that opens while you're mid-task, not one you have to stop and wait for. The morning reads as one
+continuous four-hour stretch (8am–12pm) instead of two hours of work followed by three of watching a
+clock: the last two hours of the 5am window, followed straight through by the first two of the next.
+
+This needs `interaction: full` — a warm-up in `probe_only` mode never sends a message, so it never
+opens a window. See [Fields](#fields).
 
 ## Install
 
