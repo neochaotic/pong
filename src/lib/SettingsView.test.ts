@@ -189,6 +189,37 @@ describe("SettingsView", () => {
     expect(screen.getByTestId("clear-session")).toHaveTextContent("Clear session data");
   });
 
+  it("does not restore defaults on the first click", async () => {
+    const { onSave, user } = setup();
+
+    await user.click(screen.getByTestId("restore-defaults"));
+
+    expect(field("target_url")).toHaveValue("https://dash.internal/login");
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.getByTestId("restore-defaults")).toHaveTextContent("Confirm");
+  });
+
+  it("fills the form with defaults once confirmed, without saving", async () => {
+    const { onSave, user } = setup();
+
+    await user.click(screen.getByTestId("restore-defaults"));
+    await user.click(screen.getByTestId("restore-defaults"));
+
+    expect(field("target_url")).toHaveValue("https://github.com/login");
+    expect(field("cron")).toHaveValue("0 0 5 * * Mon-Fri");
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("lets the user back out before confirming a restore", async () => {
+    const { user } = setup();
+
+    await user.click(screen.getByTestId("restore-defaults"));
+    await user.click(screen.getByRole("button", { name: "cancel" }));
+
+    expect(field("target_url")).toHaveValue("https://dash.internal/login");
+    expect(screen.getByTestId("restore-defaults")).toHaveTextContent("Restore defaults");
+  });
+
   it("surfaces a failure from the backend", async () => {
     const { user } = setup(null, "Error: monitor webview is not running");
 

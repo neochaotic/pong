@@ -53,6 +53,13 @@
   let nowSec = $state(Math.floor(Date.now() / 1000));
   let busy = $state(false);
   let reconnecting = $state(false);
+  let confirmingReconnect = $state(false);
+  /** Set when a heartbeat genuinely says "still not signed in" — phrased as
+   * a status, not an error, since that's the expected state for as long as
+   * someone is mid sign-in. A same-instant guard collision (another check
+   * already running) is a wholly different, transient case and never
+   * reaches here — see `finishReconnect`. */
+  let reconnectStatus = $state<string | null>(null);
 
   // The backend pushes an absolute timestamp; the countdown ticks locally so the
   // display stays smooth without a message every second.
@@ -91,7 +98,10 @@
 
     const unlisten = onSnapshot((s) => {
       snapshot = s;
-      if (!s.needs_relogin) reconnecting = false;
+      if (!s.needs_relogin) {
+        reconnecting = false;
+        reconnectStatus = null;
+      }
     });
     const timer = setInterval(() => (nowSec = Math.floor(Date.now() / 1000)), 1000);
 
@@ -180,12 +190,42 @@
 
   async function reconnect() {
     reconnecting = true;
+    reconnectStatus = null;
     await openRelogin();
   }
 
-  async function finishReconnect() {
-    await closeRelogin();
-    reconnecting = false;
+  /** A same-instant collision with a background check (its own guard is
+   * shared with every scheduled check, and now with the automatic relogin
+   * poll too) is common and meaningless to the user — it says nothing about
+   * whether they're actually signed in. Retrying once, silently, turns
+   * "here's a scary technical error" into what it actually is: bad timing. */
+  function isTransientCollision(message: string): boolean {
+    return message.includes("check is currently running");
+  }
+
+  async function finishReconnect(isRetry = false) {
+    confirmingReconnect = true;
+    if (!isRetry) reconnectStatus = null;
+    try {
+      await closeRelogin();
+      reconnecting = false;
+      reconnectStatus = null;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (isTransientCollision(message) && !isRetry) {
+        await new Promise((r) => setTimeout(r, 1200));
+        confirmingReconnect = false;
+        return finishReconnect(true);
+      }
+      // A genuine "still not signed in" — expected while someone is mid
+      // sign-in, not a failure, so it reads as a status rather than an
+      // error. The dashboard window stays open either way.
+      reconnectStatus = isTransientCollision(message)
+        ? "Still checking…"
+        : "Not signed in yet.";
+    } finally {
+      confirmingReconnect = false;
+    }
   }
 
   function onKeydown(event: KeyboardEvent) {
@@ -326,15 +366,31 @@
       <p class="text-[13px] leading-snug text-chalk">Dashboard session expired.</p>
       <p class="text-[11px] leading-snug text-fog">
         {reconnecting
-          ? "Log in on the dashboard window, then confirm below."
+          ? "Log in on the dashboard window — Pong checks automatically every few seconds."
           : "Reopen the dashboard to sign in again."}
       </p>
+      {#if reconnecting && !reconnectStatus}
+        <p class="flex items-center gap-1.5 text-[10px] leading-snug text-fog">
+          <span class="size-1.5 animate-pulse rounded-full bg-signal"></span>
+          Watching for sign-in…
+        </p>
+      {/if}
+      {#if reconnectStatus}
+        <p class="text-[11px] leading-snug text-fog" data-testid="reconnect-status">
+          {reconnectStatus}
+        </p>
+      {/if}
       <button
         class="rounded-lg bg-signal px-3 py-2 text-[12px] font-medium text-chalk
-               transition hover:brightness-110 active:brightness-95"
-        onclick={reconnecting ? finishReconnect : reconnect}
+               transition hover:brightness-110 active:brightness-95 disabled:opacity-50"
+        onclick={() => (reconnecting ? finishReconnect() : reconnect())}
+        disabled={confirmingReconnect}
       >
-        {reconnecting ? "I'm signed in — resume monitoring" : "Reconnect dashboard"}
+        {confirmingReconnect
+          ? "Checking…"
+          : reconnecting
+            ? "Check now"
+            : "Reconnect dashboard"}
       </button>
     </section>
 

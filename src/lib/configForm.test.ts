@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_CONFIG,
   DEFAULT_CRON,
+  defaultForm,
   expandFiveFieldCron,
   isCronShaped,
   toConfig,
@@ -233,5 +235,22 @@ describe("validateForm", () => {
   it("accumulates every problem at once", () => {
     const form = { ...toForm(config), target_url: "nope", cron: "* * *", authenticated: "" };
     expect(validateForm(form).length).toBe(3);
+  });
+});
+
+describe("DEFAULT_CONFIG / defaultForm", () => {
+  it("mirrors Config::default() — a real login page, probe-only, cron off", () => {
+    expect(DEFAULT_CONFIG.target_url).toBe("https://github.com/login");
+    expect(DEFAULT_CONFIG.interaction).toBe("probe_only");
+    expect(DEFAULT_CONFIG.cron_enabled).toBe(false);
+    expect(DEFAULT_CONFIG.cron).toBe(DEFAULT_CRON);
+  });
+
+  it("passes its own validator, so Restore defaults never hands back a form Save would reject", () => {
+    expect(validateForm(toForm(DEFAULT_CONFIG))).toEqual([]);
+  });
+
+  it("is exactly toForm(DEFAULT_CONFIG)", () => {
+    expect(defaultForm()).toEqual(toForm(DEFAULT_CONFIG));
   });
 });

@@ -457,6 +457,121 @@ pub fn hide_relogin(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Re-checks the session before trusting a manual "I'm signed in" click,
+/// rather than clearing `needs_relogin` on the user's word alone.
+///
+/// Blind trust broke two ways in practice: a health/usage check already
+/// in flight when the button was clicked could land its own (stale) 401
+/// right after this cleared the flag, silently flipping it back on; and
+/// clicking before sign-in actually finished "resumed" a session that
+/// was never really back. Both looked identical from the outside — the
+/// banner would reappear, or monitoring would silently keep failing —
+/// leaving someone clicking the same button twice with no idea why the
+/// first click didn't stick. Running a real heartbeat here, under the
+/// same exclusivity guard every other check uses, fixes both at once.
+pub async fn confirm_relogin(app: &AppHandle, state: &Arc<AppState>) -> Result<(), String> {
+    let Some(_guard) = state.try_begin_check() else {
+        return Err("a check is currently running — try again in a moment".into());
+    };
+    let Some(webview) = app.get_webview_window(MONITOR_LABEL) else {
+        return Err("monitor webview is not running".into());
+    };
+
+    let cfg = state.config_snapshot();
+    let nonce = state.next_nonce();
+    let params = InjectionParams::from_config(&cfg, nonce);
+    let heartbeat = probe(
+        &webview,
+        state,
+        build_heartbeat_call(&params),
+        nonce,
+        HEARTBEAT_TIMEOUT,
+    )
+    .await;
+
+    if is_confirmed_authenticated(&heartbeat) {
+        hide_relogin(app)?;
+        finish(
+            app,
+            state,
+            HealthReport::new(200, "signed in — resuming monitoring", 0),
+        );
+        return Ok(());
+    }
+
+    // Leave the dashboard window open and the recovery banner up — the user
+    // is presumably still looking at it, mid sign-in (or mid-2FA, which is
+    // exactly the case `is_confirmed_authenticated` exists to not mistake
+    // for success).
+    let report = report_from_heartbeat(heartbeat);
+    let detail = report.detail.clone();
+    finish(app, state, report);
+    Err(format!("still not signed in — {detail}"))
+}
+
+/// Only an explicit 200 counts as "confirmed signed in". `decide_after_heartbeat`'s
+/// looser `Next::Proceed` (anything that isn't a 401) is fine for the scheduled
+/// pipeline — worst case it wastes one check — but here it would hide the
+/// sign-in window out from under someone who's simply mid-2FA: a verification-
+/// code prompt matches neither the `authenticated` nor the `login_indicator`
+/// selector, so the probe reports 503 ("neither marker found"), which
+/// `Next::Proceed` would otherwise treat as success.
+fn is_confirmed_authenticated(heartbeat: &Result<ProbePayload, ProbeError>) -> bool {
+    matches!(heartbeat, Ok(payload) if payload.code == 200)
+}
+
+/// A report worth showing/logging for a heartbeat that didn't confirm
+/// sign-in — reuses `decide_after_heartbeat`'s cases (401, timeout, eval
+/// error) and fills in the one case it doesn't treat as failure (503,
+/// via `Next::Proceed`) with its own.
+fn report_from_heartbeat(heartbeat: Result<ProbePayload, ProbeError>) -> HealthReport {
+    match decide_after_heartbeat(heartbeat) {
+        Next::Abort(report) => report,
+        Next::Proceed => HealthReport::new(503, "neither auth nor login marker found", 0),
+    }
+}
+
+/// Passive background counterpart to `confirm_relogin`, run on every tick
+/// while `needs_relogin` is set, so sign-in is detected on its own instead
+/// of requiring the button click — a heartbeat is read-only (no navigation),
+/// so it's safe to run even while the window is open for manual sign-in.
+///
+/// Deliberately quieter than `confirm_relogin` on failure: that's the normal
+/// case here (most ticks land while someone is still mid-login), and logging
+/// or notifying about it every 15s would spam the history for no reason.
+pub async fn poll_relogin(app: &AppHandle, state: &Arc<AppState>) {
+    if !state.needs_relogin() {
+        return;
+    }
+    let Some(_guard) = state.try_begin_check() else {
+        return;
+    };
+    let Some(webview) = app.get_webview_window(MONITOR_LABEL) else {
+        return;
+    };
+
+    let cfg = state.config_snapshot();
+    let nonce = state.next_nonce();
+    let params = InjectionParams::from_config(&cfg, nonce);
+    let heartbeat = probe(
+        &webview,
+        state,
+        build_heartbeat_call(&params),
+        nonce,
+        HEARTBEAT_TIMEOUT,
+    )
+    .await;
+
+    if is_confirmed_authenticated(&heartbeat) {
+        let _ = hide_relogin(app);
+        finish(
+            app,
+            state,
+            HealthReport::new(200, "signed in — resuming monitoring", 0),
+        );
+    }
+}
+
 /// Verdict-driven tray tooltip text.
 pub fn tooltip_for(phase: Phase, verdict: Option<Verdict>, countdown: Option<i64>) -> String {
     let status = match (phase, verdict) {
@@ -676,6 +791,48 @@ mod tests {
             }
             Next::Proceed => panic!("a failed eval must abort the check"),
         }
+    }
+
+    // `is_confirmed_authenticated` is deliberately stricter than
+    // `decide_after_heartbeat`'s `Next::Proceed` — a real bug, not a
+    // hypothetical: a 2FA verification-code screen matches neither the
+    // `authenticated` nor `login_indicator` selector, so the heartbeat
+    // reports 503, and `Next::Proceed` treats that as success. Reusing that
+    // check for the relogin-confirmation paths hid the sign-in window out
+    // from under someone still typing their verification code.
+    #[test]
+    fn confirmed_authenticated_requires_exactly_200() {
+        assert!(is_confirmed_authenticated(&Ok(payload(200))));
+    }
+
+    #[test]
+    fn confirmed_authenticated_rejects_the_2fa_case_that_broke_this() {
+        // 503 "neither marker found" — what a verification-code prompt
+        // reports. `Next::Proceed` would treat this as success.
+        assert!(!is_confirmed_authenticated(&Ok(payload(503))));
+    }
+
+    #[test]
+    fn confirmed_authenticated_rejects_a_login_screen() {
+        assert!(!is_confirmed_authenticated(&Ok(payload(401))));
+    }
+
+    #[test]
+    fn confirmed_authenticated_rejects_a_timeout_or_eval_failure() {
+        assert!(!is_confirmed_authenticated(&Err(ProbeError::Timeout)));
+        assert!(!is_confirmed_authenticated(&Err(ProbeError::Eval(
+            "no webview".into()
+        ))));
+    }
+
+    #[test]
+    fn report_from_heartbeat_labels_the_503_case_explicitly() {
+        // `decide_after_heartbeat` alone would silently call this Next::Proceed
+        // with no report attached; the relogin-confirmation paths need
+        // something to actually show/log when it isn't a real 401.
+        let report = report_from_heartbeat(Ok(payload(503)));
+        assert_eq!(report.code, 503);
+        assert!(report.detail.contains("neither"), "{}", report.detail);
     }
 
     #[test]

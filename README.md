@@ -203,6 +203,11 @@ there is no undo, and it signs you out of the dashboard.
 Use it to switch accounts, or when a half-expired session leaves the page in a
 state that matches neither marker and every check reports `503`.
 
+To sign back in afterwards — as the same account or a different one — it's the
+same three steps as [Signing in](#signing-in) above: **Show login**, sign in by
+hand, **Hide login**. Log out and log back in is that flow twice in a row, not
+a separate feature.
+
 ## Session persistence
 
 The hidden webview is built with `.data_directory(app_data_dir/webview-session)`, so cookies and
@@ -391,6 +396,28 @@ persists normally across restarts.
 
 This is a limitation of the platform's webview, not something Pong can work
 around.
+
+### "Continue with Google" may fail in the sign-in window
+
+Verified on claude.ai: if the Google account signing in uses a passkey, it hits the
+same cross-device Bluetooth flow as above and fails the same way — claude.ai then
+shows a generic *"There was an error logging you in"*. This isn't claude.ai or
+Google specifically blocking embedded webviews; it's the same partial WebAuthn
+support, reached through a different door.
+
+The professional fix for OAuth-in-a-webview is well established — Google's own
+guidance (RFC 8252) is to run the flow in the system's real browser and capture the
+redirect via a custom URL scheme or a local loopback server, which is why apps like
+Slack or Docker Desktop show "Continue in browser." That doesn't carry over cleanly
+here: it solves the OAuth handshake, but Pong doesn't just need a token — it needs
+the resulting session *cookies* live inside its own hidden webview, so the scheduled
+checks can use them unattended. A system-browser handoff leaves those cookies in the
+system browser's jar instead, with no clean, non-hacky way to move them into the
+webview's own cookie store afterward.
+
+**Workaround:** sign in with email/password (or a non-WebAuthn second factor —
+TOTP or SMS) for the account Pong monitors. Once signed in, the session persists
+normally regardless of how you got there.
 
 ### SSO redirects
 
