@@ -97,11 +97,19 @@ jobs:
             | Debian / Ubuntu | `.deb` | `sudo apt install ./Pong_*.deb` |
             | Fedora / RHEL / openSUSE | `.rpm` | `sudo dnf install ./Pong-*.rpm` |
 
-            **These builds are not code-signed.** macOS will refuse the first
-            launch: right-click the app → *Open* → *Open*, or run
-            `xattr -cr /Applications/Pong.app`. Windows SmartScreen will warn:
-            *More info* → *Run anyway*. Signing requires a paid Apple Developer
-            account and a Windows code-signing certificate.
+            ### Before you open the app for the first time
+
+            **These builds are not code-signed** (needs a paid Apple Developer account and a
+            Windows code-signing certificate — not set up yet), so the OS blocks the first launch:
+
+            - **macOS**: a plain double-click fails *silently* — Gatekeeper blocks it before the
+              process starts, and since Pong is a menu-bar-only app (no Dock icon, no window),
+              nothing visibly happens. It looks like the install did nothing even though it
+              worked. Fix: right-click the app → *Open* → *Open* (once), or run
+              `xattr -cr /Applications/Pong.app`.
+            - **Windows**: SmartScreen warns — *More info* → *Run anyway*.
+
+            Still no tray icon after that? That's a real bug, not this one — please open an issue.
 
             ### Before you file an issue
 
