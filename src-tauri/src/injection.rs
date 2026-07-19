@@ -67,15 +67,18 @@ fn build_call(method: &str, params: &InjectionParams) -> String {
     )
 }
 
-/// Evaluate the claude.ai usage-panel scraper. Independent of `InjectionParams`
-/// — the scraper needs nothing but a nonce to correlate its report.
-pub fn build_usage_call(nonce: u64) -> String {
+/// Evaluate the claude.ai usage-panel scraper. Takes the full
+/// `InjectionParams` (not just a nonce) so the scraper can check
+/// `selectors.login_indicator` — the same signal the health check uses —
+/// before trusting whatever it finds on the page.
+pub fn build_usage_call(params: &InjectionParams) -> String {
+    let json = serde_json::to_string(params).expect("injection params are serializable");
     format!(
-        "(function(){{var p={{nonce:{nonce}}};\
+        "(function(){{var p={json};\
          if(window.__PONG__&&window.__PONG__.scrapeUsage){{window.__PONG__.scrapeUsage(p);}}\
          else{{try{{window.__TAURI_INTERNALS__.invoke('report_usage',\
          {{payload:{{session_percent:null,session_reset_text:null,\
-         weekly_percent:null,weekly_reset_text:null,nonce:p.nonce}}}});\
+         weekly_percent:null,weekly_reset_text:null,logged_out:false,nonce:p.nonce}}}});\
          }}catch(e){{}}}}}})()"
     )
 }
@@ -221,16 +224,27 @@ mod tests {
 
     #[test]
     fn usage_call_targets_scrape_usage() {
-        let js = build_usage_call(7);
+        let mut p = params_with("ping", "textarea");
+        p.nonce = 7;
+        let js = build_usage_call(&p);
         assert!(js.contains("window.__PONG__.scrapeUsage(p)"), "{js}");
-        assert!(js.contains("nonce:7"), "{js}");
+        assert!(js.contains("\"nonce\":7"), "{js}");
+    }
+
+    #[test]
+    fn usage_call_carries_the_login_indicator_selector() {
+        let p = params_with("ping", "textarea");
+        let js = build_usage_call(&p);
+        assert!(js.contains("login_indicator"), "{js}");
     }
 
     #[test]
     fn usage_call_falls_back_to_reporting_when_agent_is_missing() {
-        let js = build_usage_call(1);
+        let p = params_with("ping", "textarea");
+        let js = build_usage_call(&p);
         assert!(js.contains("report_usage"), "{js}");
         assert!(js.contains("session_percent:null"), "{js}");
+        assert!(js.contains("logged_out:false"), "{js}");
     }
 
     #[test]

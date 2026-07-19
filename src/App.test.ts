@@ -103,6 +103,45 @@ describe("dash tab (default view)", () => {
     expect(await screen.findByTestId("usage-view")).toBeInTheDocument();
   });
 
+  it("tells the user usage_url is unset, rather than looking permanently stuck loading", async () => {
+    // beforeEach's default getConfig already resolves usage_url: null.
+    render(App);
+    expect(await screen.findByTestId("usage-unconfigured")).toHaveTextContent(
+      "Set a usage page URL in Settings"
+    );
+  });
+
+  it("surfaces a failed usage refresh instead of leaving the dash looking merely idle", async () => {
+    api.getConfig.mockResolvedValue({
+      target_url: "https://dash.internal/login",
+      cron: "0 0 5 * * Mon-Fri",
+      cron_enabled: false,
+      selectors: {
+        authenticated: "#main",
+        login_indicator: "#login",
+        action_button: null,
+        text_input: "textarea",
+        submit_button: null,
+        response: null,
+      },
+      cleanup: { menu_button: null, delete_option: null, confirm_button: null },
+      payload: "ping",
+      settle_ms: 3000,
+      typing_delay_ms: 60,
+      element_timeout_ms: 10000,
+      notifications_enabled: true,
+      interaction: "full",
+      usage_url: "https://dash.internal/usage",
+    });
+    api.getUsage.mockResolvedValue(null);
+    api.getUsageHistory.mockResolvedValue([
+      { ok: false, detail: "session expired", latency_ms: 400, at: new Date().toISOString() },
+    ]);
+    render(App);
+
+    expect(await screen.findByText("Last check failed: session expired")).toBeInTheDocument();
+  });
+
   it("shows the usage page's URL in its footer, not the health check's target", async () => {
     api.getConfig.mockResolvedValue({
       target_url: "https://dash.internal/login",
@@ -159,6 +198,27 @@ describe("dash tab (default view)", () => {
   });
 
   it("fetches usage on mount and renders the percentages", async () => {
+    api.getConfig.mockResolvedValue({
+      target_url: "https://dash.internal/login",
+      cron: "0 0 5 * * Mon-Fri",
+      cron_enabled: false,
+      selectors: {
+        authenticated: "#main",
+        login_indicator: "#login",
+        action_button: null,
+        text_input: "textarea",
+        submit_button: null,
+        response: null,
+      },
+      cleanup: { menu_button: null, delete_option: null, confirm_button: null },
+      payload: "ping",
+      settle_ms: 3000,
+      typing_delay_ms: 60,
+      element_timeout_ms: 10000,
+      notifications_enabled: true,
+      interaction: "full",
+      usage_url: "https://dash.internal/usage",
+    });
     api.getUsage.mockResolvedValue(usageSnapshot());
     render(App);
 
@@ -244,17 +304,17 @@ describe("monitor tab", () => {
     expect((await screen.findAllByText("dash.internal/login")).length).toBeGreaterThan(0);
   });
 
-  it("runs a check when Force Check is pressed", async () => {
+  it("runs a check when Ping Now is pressed", async () => {
     render(App);
     const user = userEvent.setup();
     await goToMonitorTab(user);
 
-    await user.click(await screen.findByRole("button", { name: "Force Check" }));
+    await user.click(await screen.findByRole("button", { name: "Ping Now" }));
 
     expect(api.forceCheck).toHaveBeenCalledOnce();
   });
 
-  it("disables Force Check while a check is in flight", async () => {
+  it("disables Ping Now while a check is in flight", async () => {
     api.getSnapshot.mockResolvedValue(snapshot({ phase: "PINGING" }));
     render(App);
     const user = userEvent.setup();
@@ -281,7 +341,7 @@ describe("recovery view", () => {
     render(App);
 
     expect(await screen.findByText("Dashboard session expired.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Force Check" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ping Now" })).not.toBeInTheDocument();
   });
 
   it("opens the dashboard window to reconnect", async () => {
@@ -323,7 +383,10 @@ describe("history view", () => {
 
     await user.click(await screen.findByRole("button", { name: "History" }));
 
-    await waitFor(() => expect(api.getUsageHistory).toHaveBeenCalledOnce());
+    // getUsageHistory is also polled on mount (it backs the dash's "last
+    // check failed" line), so this only confirms opening History fetches
+    // fresh data too, not that it's the first call ever made.
+    await waitFor(() => expect(api.getUsageHistory).toHaveBeenCalled());
     expect(api.getHistory).not.toHaveBeenCalled();
     expect(await screen.findByTestId("history-row")).toBeInTheDocument();
   });
@@ -345,7 +408,6 @@ describe("history view", () => {
     await user.click(await screen.findByRole("button", { name: "History" }));
 
     await waitFor(() => expect(api.getHistory).toHaveBeenCalledOnce());
-    expect(api.getUsageHistory).not.toHaveBeenCalled();
     expect(await screen.findByTestId("history-row")).toBeInTheDocument();
   });
 
@@ -357,7 +419,7 @@ describe("history view", () => {
     await user.click(await screen.findByRole("button", { name: "History" }));
     await user.click(await screen.findByRole("button", { name: "Back" }));
 
-    expect(await screen.findByRole("button", { name: "Force Check" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Ping Now" })).toBeInTheDocument();
   });
 });
 

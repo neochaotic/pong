@@ -47,6 +47,9 @@
   let history = $state<HealthReport[]>([]);
   let usage = $state<UsageSnapshot | null>(null);
   let usageHistory = $state<UsageLogEntry[]>([]);
+  /** Newest usage-check attempt, shown on the dash even when it failed and
+   * left `usage` stale — otherwise a failed refresh is invisible. */
+  let lastUsageLog = $state<UsageLogEntry | null>(null);
   let usageRefreshing = $state(false);
   let nowSec = $state(Math.floor(Date.now() / 1000));
   let busy = $state(false);
@@ -67,6 +70,8 @@
     try {
       await forceUsageCheck();
       usage = await getUsage();
+      const log = await getUsageHistory();
+      lastUsageLog = log[0] ?? null;
     } finally {
       usageRefreshing = false;
     }
@@ -211,7 +216,7 @@
 >
   <header class="flex items-center justify-between pb-3">
     {#if view === "main"}
-      <div class="relative flex items-center rounded-lg bg-ink-900 p-0.5">
+      <div class="relative flex items-center rounded-lg bg-ink-900 p-0.5" role="tablist">
         <!-- Sliding thumb behind the label, not a background swap on click:
              the two tabs read as one control with a moving state, not two
              independent buttons. -->
@@ -221,6 +226,8 @@
           style="transform: translateX({tab === 'dash' ? '0' : '4rem'})"
         ></div>
         <button
+          role="tab"
+          aria-selected={tab === "dash"}
           class="relative z-10 w-16 py-1 text-center font-mono text-[9px] tracking-[0.12em]
                  transition-colors {tab === 'dash' ? 'text-chalk' : 'text-fog hover:text-chalk'}"
           data-testid="tab-dash"
@@ -229,6 +236,8 @@
           DASH
         </button>
         <button
+          role="tab"
+          aria-selected={tab === "monitor"}
           class="relative z-10 w-16 py-1 text-center font-mono text-[9px] tracking-[0.12em]
                  transition-colors {tab === 'monitor' ? 'text-chalk' : 'text-fog hover:text-chalk'}"
           data-testid="tab-monitor"
@@ -352,6 +361,8 @@
         >
           <UsageView
             {usage}
+            {lastUsageLog}
+            configured={config?.usage_url != null}
             refreshing={usageRefreshing}
             dashboardVisible={snapshot?.dashboard_visible ?? false}
             onRefresh={refreshUsage}
@@ -396,7 +407,7 @@
               </span>
             {:else}
               <span class="font-mono text-[13px] leading-snug text-fog">
-                Disabled — flip the switch above, or use Force Check below.
+                Disabled — flip the switch above, or use Ping Now below.
               </span>
             {/if}
           </section>
@@ -407,7 +418,7 @@
             onclick={runCheck}
             disabled={busy || phase === "PINGING"}
           >
-            {busy || phase === "PINGING" ? "Checking…" : "Force Check"}
+            {busy || phase === "PINGING" ? "Checking…" : "Ping Now"}
           </button>
 
           <footer class="flex flex-col gap-2 border-t border-line pt-3">

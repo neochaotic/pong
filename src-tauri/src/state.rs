@@ -494,6 +494,7 @@ mod tests {
             session_reset_text: Some("Resets in 3 hr 43 min".into()),
             weekly_percent: Some(40),
             weekly_reset_text: Some("Resets in 7 hr 23 min".into()),
+            logged_out: false,
             nonce,
         });
 

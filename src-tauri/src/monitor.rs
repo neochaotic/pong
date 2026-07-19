@@ -4,7 +4,7 @@ use crate::health::{HealthReport, Phase, ProbePayload, Verdict};
 use crate::injection::{build_check_call, build_heartbeat_call, build_usage_call, InjectionParams};
 use crate::state::AppState;
 use crate::usage::UsageSnapshot;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
@@ -128,19 +128,43 @@ fn check_budget(cfg: &crate::config::Config) -> Duration {
     Duration::from_millis(typing + cfg.settle_ms + element_waits) + FIXED_OVERHEAD
 }
 
-/// How long a read-only usage scrape may take, including navigation.
-const USAGE_TIMEOUT: Duration = Duration::from_secs(15);
-/// How long to let the usage page render before evaluating the scraper —
-/// there is no known-good marker element to poll for, unlike the generic
-/// check pipeline.
-const USAGE_SETTLE: Duration = Duration::from_millis(2500);
+/// Fixed slack on top of the configured settle/element-timeout, for the
+/// same reason `FIXED_OVERHEAD` exists on the check budget: IPC and JS
+/// engine overhead the user's settings don't account for.
+const USAGE_FIXED_OVERHEAD: Duration = Duration::from_secs(2);
+
+/// What a scraped usage payload resolves to, decided before any I/O — the
+/// login check must win over "couldn't parse the percentages", or a session
+/// that expired mid-week would be reported as a confusing parse failure
+/// instead of the same "please sign in again" prompt the health check shows.
+#[derive(Debug, PartialEq)]
+enum ScrapeOutcome {
+    /// The scraper found `selectors.login_indicator` instead of the usage
+    /// panel: report it as a session expiry, not a scrape failure.
+    LoggedOut,
+    Done(Result<UsageSnapshot, String>),
+}
+
+/// Pure decision, split out of `scrape_usage` specifically so it can be unit
+/// tested without a webview — mirrors `decide_after_heartbeat` for the
+/// health-check pipeline.
+fn interpret_usage_payload(
+    payload: crate::usage::UsageProbePayload,
+    now: DateTime<Utc>,
+) -> ScrapeOutcome {
+    if payload.logged_out {
+        return ScrapeOutcome::LoggedOut;
+    }
+    ScrapeOutcome::Done(payload.into_snapshot(now))
+}
 
 /// Navigate the hidden webview to claude.ai's usage panel, scrape it, and
 /// navigate back to the configured target — under the same exclusivity guard
 /// as a health check, since both drive the same webview and a cron tick
 /// landing mid-scrape would otherwise type into the wrong page.
 pub async fn run_usage_check(app: AppHandle, state: Arc<AppState>) {
-    let Some(usage_url) = state.config_snapshot().usage_url else {
+    let cfg = state.config_snapshot();
+    let Some(usage_url) = cfg.usage_url.clone() else {
         log::debug!("usage check skipped: usage_url not configured");
         return;
     };
@@ -157,61 +181,83 @@ pub async fn run_usage_check(app: AppHandle, state: Arc<AppState>) {
     };
 
     let started = std::time::Instant::now();
-    let target_url = state.config_snapshot().target_url;
 
-    let result = scrape_usage(&webview, &state, &usage_url).await;
+    let outcome = scrape_usage(&webview, &state, &cfg, &usage_url).await;
 
     // Always return to the configured target, regardless of outcome, so the
     // health-check pipeline resumes on the right page.
-    if let Ok(url) = target_url.parse() {
+    if let Ok(url) = cfg.target_url.parse() {
         let _ = webview.navigate(url);
     }
 
     let latency_ms = started.elapsed().as_millis() as u64;
-    match &result {
-        Ok(snapshot) => log::info!(
-            "usage check finished: session {}% weekly {}% ({}ms)",
-            snapshot.session_percent,
-            snapshot.weekly_percent,
-            latency_ms
-        ),
-        Err(reason) => log::warn!("usage check failed: {reason} ({latency_ms}ms)"),
-    }
-    state.record_usage_result(result, latency_ms);
 
-    emit_snapshot(&app, &state);
+    match outcome {
+        ScrapeOutcome::LoggedOut => {
+            state.record_usage_result(Err("session expired".into()), latency_ms);
+            // Same pipeline the health check uses for a 401: notifies (once,
+            // on the transition) and surfaces the recovery popover. Two
+            // checks watching the same session should not each have their
+            // own idea of whether it is alive.
+            finish(
+                &app,
+                &state,
+                HealthReport::new(401, "session expired (seen during usage check)", latency_ms),
+            );
+        }
+        ScrapeOutcome::Done(result) => {
+            match &result {
+                Ok(snapshot) => log::info!(
+                    "usage check finished: session {}% weekly {}% ({}ms)",
+                    snapshot.session_percent,
+                    snapshot.weekly_percent,
+                    latency_ms
+                ),
+                Err(reason) => log::warn!("usage check failed: {reason} ({latency_ms}ms)"),
+            }
+            state.record_usage_result(result, latency_ms);
+            emit_snapshot(&app, &state);
+        }
+    }
 }
 
 async fn scrape_usage(
     webview: &WebviewWindow,
     state: &AppState,
+    cfg: &crate::config::Config,
     usage_url: &str,
-) -> Result<UsageSnapshot, String> {
-    let url = usage_url
-        .parse()
-        .map_err(|e| format!("invalid usage_url: {e}"))?;
-    webview
-        .navigate(url)
-        .map_err(|e| format!("navigation to usage page failed: {e}"))?;
+) -> ScrapeOutcome {
+    let url = match usage_url.parse() {
+        Ok(url) => url,
+        Err(e) => return ScrapeOutcome::Done(Err(format!("invalid usage_url: {e}"))),
+    };
+    if let Err(e) = webview.navigate(url) {
+        return ScrapeOutcome::Done(Err(format!("navigation to usage page failed: {e}")));
+    }
 
-    tokio::time::sleep(USAGE_SETTLE).await;
+    // No known-good marker element to poll for on this page (unlike the
+    // generic check pipeline), so this is a flat wait — but driven by the
+    // user's own settle_ms rather than a value they cannot tune.
+    tokio::time::sleep(Duration::from_millis(cfg.settle_ms)).await;
 
     let nonce = state.next_nonce();
     let rx = state.expect_usage_report(nonce);
-    if let Err(e) = webview.eval(build_usage_call(nonce)) {
+    let params = InjectionParams::from_config(cfg, nonce);
+    if let Err(e) = webview.eval(build_usage_call(&params)) {
         state.forget_usage_report(nonce);
-        return Err(format!("injection failed: {e}"));
+        return ScrapeOutcome::Done(Err(format!("injection failed: {e}")));
     }
 
-    let payload = match tokio::time::timeout(USAGE_TIMEOUT, rx).await {
+    let timeout = Duration::from_millis(cfg.element_timeout_ms) + USAGE_FIXED_OVERHEAD;
+    let payload = match tokio::time::timeout(timeout, rx).await {
         Ok(Ok(payload)) => payload,
         _ => {
             state.forget_usage_report(nonce);
-            return Err("usage scrape timed out".into());
+            return ScrapeOutcome::Done(Err("usage scrape timed out".into()));
         }
     };
 
-    payload.into_snapshot(Utc::now())
+    interpret_usage_payload(payload, Utc::now())
 }
 
 #[derive(Debug)]
@@ -436,6 +482,67 @@ pub fn tooltip_for(phase: Phase, verdict: Option<Verdict>, countdown: Option<i64
 mod tests {
     use super::*;
     use crate::config::Config;
+    use crate::usage::UsageProbePayload;
+
+    fn usage_payload(over: UsageProbePayload) -> UsageProbePayload {
+        over
+    }
+
+    #[test]
+    fn a_logged_out_payload_is_flagged_before_the_percentages_are_even_looked_at() {
+        let payload = usage_payload(UsageProbePayload {
+            logged_out: true,
+            // A page that happens to also carry stray, well-formed
+            // percentage text must not accidentally look like real data.
+            session_percent: Some(50),
+            session_reset_text: Some("Resets in 1 hr".into()),
+            weekly_percent: Some(50),
+            weekly_reset_text: Some("Resets in 1 hr".into()),
+            nonce: 1,
+        });
+
+        assert_eq!(
+            interpret_usage_payload(payload, Utc::now()),
+            ScrapeOutcome::LoggedOut
+        );
+    }
+
+    #[test]
+    fn a_normal_payload_resolves_to_a_snapshot() {
+        let payload = usage_payload(UsageProbePayload {
+            logged_out: false,
+            session_percent: Some(26),
+            session_reset_text: Some("Resets in 3 hr 43 min".into()),
+            weekly_percent: Some(40),
+            weekly_reset_text: Some("Resets in 7 hr 23 min".into()),
+            nonce: 1,
+        });
+
+        match interpret_usage_payload(payload, Utc::now()) {
+            ScrapeOutcome::Done(Ok(snapshot)) => {
+                assert_eq!(snapshot.session_percent, 26);
+                assert_eq!(snapshot.weekly_percent, 40);
+            }
+            other => panic!("expected a resolved snapshot, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_partial_payload_that_is_not_logged_out_still_fails_closed() {
+        let payload = usage_payload(UsageProbePayload {
+            logged_out: false,
+            session_percent: None,
+            session_reset_text: None,
+            weekly_percent: None,
+            weekly_reset_text: None,
+            nonce: 1,
+        });
+
+        match interpret_usage_payload(payload, Utc::now()) {
+            ScrapeOutcome::Done(Err(_)) => {}
+            other => panic!("expected a scrape failure, got {other:?}"),
+        }
+    }
 
     #[test]
     fn budget_covers_typing_plus_settle_plus_element_wait_plus_overhead() {

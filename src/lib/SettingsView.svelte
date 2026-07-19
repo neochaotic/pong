@@ -74,9 +74,14 @@
     "w-full rounded-md border border-line bg-ink-900 px-2 py-1.5 font-mono text-[11px] " +
     "text-chalk outline-none transition focus:border-signal";
   const label = "font-mono text-[9px] tracking-[0.14em] text-fog";
+  /** Group header — bolder than a field label, so the eye can skip to a
+   * section instead of reading every field name in a 20-field list. */
+  const sectionTitle = "font-mono text-[9px] font-bold tracking-[0.16em] text-chalk";
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+  <span class={sectionTitle}>TARGET &amp; SCHEDULE</span>
+
   <div class="flex flex-col gap-1">
     <span class={label}>TARGET URL</span>
     <input class={field} data-testid="field-target_url" bind:value={form.target_url} spellcheck="false" />
@@ -98,6 +103,8 @@
       </span>
     </div>
   </div>
+
+  <span class="{sectionTitle} border-t border-line pt-3">SELECTORS</span>
 
   <div class="flex flex-col gap-1">
     <span class={label}>AUTHENTICATED SELECTOR</span>
@@ -137,7 +144,7 @@
   </div>
 
   <div class="flex flex-col gap-1 border-t border-line pt-3">
-    <span class={label}>CLEANUP (OPTIONAL)</span>
+    <span class={sectionTitle}>CLEANUP (OPTIONAL)</span>
     <span class="font-mono text-[9px] leading-snug text-fog">
       Deletes what the check just created, run only after a successful interaction. Each
       step runs only if set — leave a step empty to skip it.
@@ -175,13 +182,16 @@
   </div>
 
   <div class="flex flex-col gap-1 border-t border-line pt-3">
-    <span class={label}>USAGE PAGE URL (OPTIONAL)</span>
+    <span class={sectionTitle}>USAGE DASHBOARD (OPTIONAL)</span>
+    <span class={label}>USAGE PAGE URL</span>
     <input class={field} data-testid="field-usage_url" bind:value={form.usage_url} spellcheck="false" />
     <span class="font-mono text-[9px] leading-snug text-fog">
       claude.ai's usage-limits page, e.g. https://claude.ai/settings/usage. Leave empty to
       hide the dash's usage numbers.
     </span>
   </div>
+
+  <span class="{sectionTitle} border-t border-line pt-3">MESSAGE &amp; TIMING</span>
 
   <div class="flex flex-col gap-1">
     <span class={label}>PAYLOAD</span>
@@ -207,6 +217,8 @@
     </span>
   </div>
 
+  <span class="{sectionTitle} border-t border-line pt-3">PREFERENCES</span>
+
   <Toggle
     testid="field-notifications"
     checked={form.notifications_enabled}
@@ -223,7 +235,7 @@
   />
 
   <div class="flex flex-col gap-1 border-t border-line pt-3">
-    <span class={label}>SESSION</span>
+    <span class={sectionTitle}>SESSION</span>
     <button
       data-testid="clear-session"
       class="rounded-md border px-2 py-1.5 text-[11px] transition

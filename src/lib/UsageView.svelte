@@ -1,15 +1,23 @@
 <script lang="ts">
   import { formatCountdown } from "./format";
-  import type { UsageSnapshot } from "./types";
+  import type { UsageLogEntry, UsageSnapshot } from "./types";
 
   let {
     usage,
+    lastUsageLog,
+    configured,
     refreshing,
     dashboardVisible,
     onRefresh,
     onToggleLogin,
   }: {
     usage: UsageSnapshot | null;
+    /** Newest usage-check attempt, win or lose — surfaces a failed refresh
+     * even when `usage` itself is still whatever the last success left it. */
+    lastUsageLog: UsageLogEntry | null;
+    /** Whether `usage_url` is set at all — distinct from "set, but no
+     * successful check yet". */
+    configured: boolean;
     refreshing: boolean;
     dashboardVisible: boolean;
     onRefresh: () => void;
@@ -74,12 +82,29 @@
     </button>
   </div>
 
-  {#if !usage}
+  {#if !configured}
+    <p class="py-6 text-center font-mono text-[10px] text-fog" data-testid="usage-unconfigured">
+      Set a usage page URL in Settings to enable this.
+    </p>
+  {:else if !usage}
     <p class="py-6 text-center font-mono text-[10px] text-fog" data-testid="usage-empty">
-      {refreshing ? "Fetching usage…" : "No usage data yet."}
+      {refreshing
+        ? "Fetching usage…"
+        : lastUsageLog && !lastUsageLog.ok
+          ? `Last check failed: ${lastUsageLog.detail}`
+          : "No usage data yet."}
     </p>
   {:else}
     <div class="flex flex-col gap-3">
+      {#if lastUsageLog && !lastUsageLog.ok}
+        <p
+          class="font-mono text-[9px] leading-snug text-warn"
+          data-testid="usage-last-failure"
+          title={lastUsageLog.detail}
+        >
+          Last check failed: {lastUsageLog.detail} — showing the last known numbers.
+        </p>
+      {/if}
       <div class="flex flex-col gap-1" data-testid="usage-session">
         <div class="flex items-center justify-between font-mono text-[10px] text-fog">
           <span>SESSION</span>

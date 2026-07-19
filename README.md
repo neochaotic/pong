@@ -2,7 +2,7 @@
 
 # 🏓 Pong
 
-**A synthetic web health monitor that lives in your system tray.**
+**Your Claude session, always warm. Your usage, always in view.**
 
 [![CI](https://github.com/neochaotic/pong/actions/workflows/ci.yml/badge.svg)](https://github.com/neochaotic/pong/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/neochaotic/pong?color=5e6ad2&include_prereleases&sort=semver)](https://github.com/neochaotic/pong/releases/latest)
@@ -13,18 +13,27 @@
 [![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)](https://tauri.app)
 [![Rust](https://img.shields.io/badge/Rust-1.77+-CE422B?logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?logo=svelte&logoColor=white)](https://svelte.dev)
-[![Coverage](https://img.shields.io/badge/coverage-94%25%20web%20%7C%2083%25%20rust-4cb782)](#coverage)
+[![Coverage](https://img.shields.io/badge/coverage-93%25%20web%20%7C%2082%25%20rust-4cb782)](#coverage)
 
 </div>
 
 ---
 
-Pong is a lightweight, cross-platform **synthetic web health monitor**.
+Pong is a menu-bar companion for people who live inside an LLM chat all day. It sits quietly in your
+tray and takes care of the three things that otherwise interrupt a session right when you can least
+afford it:
 
-It keeps a logged-in session to a web dashboard inside a hidden webview, and on a cron schedule it
-drives that page the way a real user would — click, type, submit, wait — then reports whether the
-dashboard actually responded. It is a synthetic transaction monitor, not a ping: it verifies the app
-*works*, not merely that the host answers TCP.
+- **📊 A live usage dashboard.** Session and weekly consumption, with the reset countdown ticking
+  in real time — so "am I about to get throttled?" is a glance, not a tab switch.
+- **🔥 Session warm-up.** On a schedule you control, Pong quietly drives the dashboard the way you
+  would — so the login screen is never what's waiting for you when you sit down to work.
+- **🩺 A health check that actually checks health.** Not a ping: a synthetic transaction. It types,
+  submits, and confirms the app responded, catching a silently broken session before you do.
+
+Under the hood, it drives a hidden webview through a real login session and evaluates injected
+JavaScript against the live DOM — the same page, the same cookies, the same path a human takes.
+Whatever it finds, it surfaces in one popover: usage, uptime, and a history of both, without ever
+leaving your keyboard.
 
 ## Install
 
@@ -226,13 +235,15 @@ The buffer is bounded on purpose: this process is expected to run for weeks.
 ```json
 {
   "target_url": "https://example.com/login",
-  "cron": "0 */15 * * * *",
+  "cron": "0 0 5 * * Mon-Fri",
+  "cron_enabled": false,
   "selectors": {
     "authenticated": "#dashboard-main",
     "login_indicator": "input[type=password]",
     "action_button": "#new-chat",
     "text_input": "textarea"
   },
+  "usage_url": null,
   "payload": "ping",
   "settle_ms": 3000,
   "typing_delay_ms": 60,
@@ -240,6 +251,11 @@ The buffer is bounded on purpose: this process is expected to run for weeks.
   "interaction": "probe_only"
 }
 ```
+
+> **`cron_enabled` defaults to `false`, on purpose.** A fresh install (or a hand-edited
+> config with a typo'd cron) should not start driving your dashboard on a schedule until
+> you deliberately turn it on — from the popover's quick toggle or the Settings panel.
+> The default cadence, once enabled, is 5am on weekdays.
 
 > **`interaction` defaults to `probe_only`, on purpose.** A full check types into
 > whatever `text_input` matches and presses Enter — on a real dashboard that can post
@@ -252,12 +268,15 @@ The buffer is bounded on purpose: this process is expected to run for weeks.
 | ------------------------- | --------------------------------------------------------------------------- |
 | `target_url`              | Dashboard entry point. Must be `http`/`https`.                              |
 | `cron`                    | **Six fields, including seconds**: `sec min hour day-of-month month day-of-week`. |
+| `cron_enabled`            | Whether the schedule actually runs. Defaults to `false`.                    |
 | `selectors.authenticated` | Present **only** when logged in. This is the health signal.                  |
 | `selectors.login_indicator` | Present **only** when logged out. Drives the 401 path.                    |
 | `selectors.action_button` | Optional. Clicked before typing. Use `null` to skip.                        |
 | `selectors.submit_button` | Optional. Waited on until enabled, then clicked. Falls back to Enter if unset. |
 | `selectors.text_input`    | `<input>`, `<textarea>` or a `contenteditable` element.                     |
 | `selectors.response`      | Optional. Matches each reply bubble; the last match's text (once it stops changing) becomes the check's `detail` instead of a generic "dashboard responded". |
+| `cleanup.menu_button`, `cleanup.delete_option`, `cleanup.confirm_button` | Optional. Deletes what a successful check just created (e.g. a chat), scoped to the page currently open so it can never touch anything else. Each step runs only if set. |
+| `usage_url`               | Optional. A usage/consumption page (currently tuned for claude.ai's) to power the popover's live usage dashboard. `null` hides it. |
 | `payload`                 | The string typed during a check.                                            |
 | `settle_ms`               | How long to wait for the DOM after Enter. Max `60000`.                      |
 | `typing_delay_ms`         | Per-keystroke delay. Max `2000`.                                            |
@@ -417,9 +436,9 @@ pnpm verify              # versions + types + both suites + both coverage gates
 Or individually:
 
 ```bash
-pnpm test                # 71 Vitest tests
+pnpm test                # 109 Vitest tests
 pnpm test:coverage       # frontend coverage, fails under 70%
-pnpm test:rust           # 67 Rust tests
+pnpm test:rust           # 121 Rust tests
 pnpm test:rust:coverage  # Rust coverage, fails under 70%
 pnpm check               # svelte-check
 cd src-tauri && cargo clippy --all-targets && cargo fmt --check
@@ -454,8 +473,8 @@ Both suites enforce a **70% floor** and currently sit well above it:
 
 | | Statements / Regions | Lines |
 | --- | --- | --- |
-| Frontend | 94.6% | 96.9% |
-| Rust (logic) | 83.2% | 84.4% |
+| Frontend | 93.2% | 95.8% |
+| Rust (logic) | 79.9% | 82.2% |
 
 **What the Rust number excludes, and why.** `lib.rs`, `tray.rs` and `main.rs` are wiring:
 window construction, IPC registration, tray callbacks. None of it exists until a real app,
@@ -482,21 +501,30 @@ escaping, and the nonce-correlated probe state machine. Logic is deliberately ke
 
 ```
 src/                    Svelte 5 popover UI
-  lib/format.ts         pure display helpers (unit tested)
+  App.svelte            tab switcher (dash/monitor), view routing, IPC wiring
+  lib/UsageView.svelte   the usage dashboard tab
+  lib/Toggle.svelte      shared switch control
+  lib/SettingsView.svelte
+  lib/HistoryView.svelte
   lib/StatusBadge.svelte
+  lib/format.ts         pure display helpers (unit tested)
+  lib/configForm.ts     Config <-> form-state mapping + client-side validation
   lib/api.ts            typed IPC wrapper
 src-tauri/src/
   config.rs             config.json parsing + validation
   scheduler.rs          cron arithmetic (pure)
   health.rs             verdicts, phases, reports
+  usage.rs              usage-panel parsing (locale-tolerant, pure)
   injection.rs          builds the evaluated JS (escaping via serde_json)
-  agent.js              the injected probe agent
-  state.rs              AppState + nonce correlation
-  monitor.rs            the check pipeline
+  agent.js              the injected probe agent + usage scraper
+  state.rs              AppState + nonce correlation (health and usage)
+  monitor.rs            the check pipeline (health checks and usage checks)
   tray.rs               tray icon, menu, popover toggle
   lib.rs                wiring: windows, IPC commands, scheduler
-src-tauri/permissions/  ACL permission for the report_health command
+src-tauri/tests/acl_test.rs   catches a command missing from the popover's ACL
+src-tauri/permissions/  ACL permissions for report_health / report_usage
 src-tauri/capabilities/ binds permissions to windows and remote origins
+scripts/                Playwright helpers used to discover claude.ai selectors
 ```
 
 ---

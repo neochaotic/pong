@@ -46,6 +46,10 @@ pub struct UsageProbePayload {
     pub weekly_percent: Option<u8>,
     #[serde(default)]
     pub weekly_reset_text: Option<String>,
+    /// True when the scraper found `selectors.login_indicator` instead of
+    /// the usage panel — the session expired, not "the page redesigned".
+    #[serde(default)]
+    pub logged_out: bool,
     pub nonce: u64,
 }
 
@@ -151,6 +155,7 @@ mod tests {
             session_reset_text: Some("Resets in 3 hr 43 min".into()),
             weekly_percent: Some(40),
             weekly_reset_text: Some("Resets in 7 hr 23 min".into()),
+            logged_out: false,
             nonce: 1,
         };
 
@@ -171,6 +176,7 @@ mod tests {
             session_reset_text: Some("Resets in 3 hr 43 min".into()),
             weekly_percent: None,
             weekly_reset_text: None,
+            logged_out: false,
             nonce: 1,
         };
 

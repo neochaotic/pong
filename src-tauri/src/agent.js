@@ -538,6 +538,20 @@
     // than any word, and "reset" text is identified by CSS class, not by
     // matching "Resets"/"Reinicia".
     scrapeUsage: function (p) {
+      // Checked first, same as probe(): a page showing the login form has no
+      // usage panel to find, and reporting "session percent not found" for
+      // that would read as a scrape bug instead of what it actually is.
+      if (p.selectors && q(p.selectors.login_indicator)) {
+        return invokeCommand("report_usage", {
+          session_percent: null,
+          session_reset_text: null,
+          weekly_percent: null,
+          weekly_reset_text: null,
+          logged_out: true,
+          nonce: p.nonce,
+        });
+      }
+
       var result = { session_percent: null, session_reset_text: null, weekly_percent: null, weekly_reset_text: null };
       try {
         var allSpans = Array.prototype.slice.call(document.querySelectorAll("span"));
@@ -580,6 +594,7 @@
         session_reset_text: result.session_reset_text,
         weekly_percent: result.weekly_percent,
         weekly_reset_text: result.weekly_reset_text,
+        logged_out: false,
         nonce: p.nonce,
       });
     },
