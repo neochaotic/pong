@@ -62,7 +62,18 @@ opens a window. See [Fields](#fields).
 
 ## Install
 
-Grab the installer for your platform from the [latest release](https://github.com/neochaotic/pong/releases/latest):
+**macOS — Homebrew (recommended):**
+
+```bash
+brew install neochaotic/pong/pong
+```
+
+This also fixes the Gatekeeper friction described below automatically (see
+[neochaotic/homebrew-pong](https://github.com/neochaotic/homebrew-pong) for how), and quits any
+running Pong before an upgrade replaces it — see [Updating](#updating-quit-pong-before-you-reinstall).
+
+Otherwise, grab the installer for your platform from the
+[latest release](https://github.com/neochaotic/pong/releases/latest):
 
 | Platform | File | Notes |
 | --- | --- | --- |
