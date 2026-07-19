@@ -134,6 +134,12 @@ Every run is two phases, so a dead session is detected before anything is typed 
 Every eval carries a **nonce**. Reports whose nonce no longer matches an in-flight probe are
 discarded, so a late reply from a previous run can never be mistaken for the current one.
 
+**Capturing the reply.** When `selectors.response` is set, a successful check does not stop at
+`settle_ms`. It polls the *last* element matching that selector and waits for its text to stop
+changing for 800ms (bounded by `element_timeout_ms`) before reporting it as the check's `detail`.
+A fixed wait risks grabbing a reply mid-stream; polling for stability adapts to however long the
+dashboard actually takes to finish responding.
+
 ### Status codes
 
 | Code    | Verdict        | Meaning                                        |
@@ -251,6 +257,7 @@ The buffer is bounded on purpose: this process is expected to run for weeks.
 | `selectors.action_button` | Optional. Clicked before typing. Use `null` to skip.                        |
 | `selectors.submit_button` | Optional. Waited on until enabled, then clicked. Falls back to Enter if unset. |
 | `selectors.text_input`    | `<input>`, `<textarea>` or a `contenteditable` element.                     |
+| `selectors.response`      | Optional. Matches each reply bubble; the last match's text (once it stops changing) becomes the check's `detail` instead of a generic "dashboard responded". |
 | `payload`                 | The string typed during a check.                                            |
 | `settle_ms`               | How long to wait for the DOM after Enter. Max `60000`.                      |
 | `typing_delay_ms`         | Per-keystroke delay. Max `2000`.                                            |

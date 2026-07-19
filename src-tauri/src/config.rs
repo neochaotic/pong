@@ -42,9 +42,14 @@ fn default_target_url() -> String {
     // restart. Paired with `Interaction::ProbeOnly`, nothing is ever typed.
     "https://github.com/login".to_string()
 }
-/// Every 15 minutes, on the second. Six fields: sec min hour dom month dow.
+/// 5am, Monday through Friday. Six fields: sec min hour dom month dow.
+///
+/// A quiet default: paired with `cron_enabled` defaulting to `false`, a fresh
+/// install runs nothing until the user opts in, and once they do, this is a
+/// once-a-weekday-morning cadence rather than something that immediately
+/// starts hammering the target every few minutes.
 fn default_cron() -> String {
-    "0 */15 * * * *".to_string()
+    "0 0 5 * * Mon-Fri".to_string()
 }
 fn default_authenticated() -> String {
     // Present only once GitHub has a session.
@@ -112,6 +117,12 @@ pub struct Selectors {
     /// what a React form with a disabled-until-valid button expects.
     #[serde(default)]
     pub submit_button: Option<String>,
+    /// Optional selector matching each reply bubble (e.g. one per assistant
+    /// turn). When set, a successful check waits for the *last* match's text
+    /// to stop changing and reports it as the check's detail, instead of a
+    /// generic "dashboard responded".
+    #[serde(default)]
+    pub response: Option<String>,
 }
 
 impl Default for Selectors {
@@ -122,7 +133,37 @@ impl Default for Selectors {
             action_button: None,
             text_input: default_text_input(),
             submit_button: None,
+            response: None,
         }
+    }
+}
+
+/// Optional post-check teardown: deletes whatever the check just created
+/// (e.g. a chat/conversation), so a monitor running every few minutes does
+/// not silently fill the dashboard with check artifacts forever.
+///
+/// Each step only runs if its selector is set, in this order, so a dashboard
+/// whose delete flow has no confirmation step can leave `confirm_button`
+/// unset. All three are independent: a missing step is simply skipped, not
+/// an error.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Cleanup {
+    /// Opens the menu that holds the delete option (e.g. a conversation's
+    /// "⋯" button).
+    #[serde(default)]
+    pub menu_button: Option<String>,
+    /// The delete/remove option, inside that menu or standalone.
+    #[serde(default)]
+    pub delete_option: Option<String>,
+    /// Confirms the destructive action in a follow-up dialog, if any.
+    #[serde(default)]
+    pub confirm_button: Option<String>,
+}
+
+impl Cleanup {
+    /// Whether any step is configured at all.
+    pub fn is_configured(&self) -> bool {
+        self.menu_button.is_some() || self.delete_option.is_some() || self.confirm_button.is_some()
     }
 }
 
@@ -135,8 +176,18 @@ pub struct Config {
     /// Six-field cron expression driving the health checks.
     #[serde(default = "default_cron")]
     pub cron: String,
+    /// Whether the cron schedule actually runs.
+    ///
+    /// Defaults to `false`: a fresh install (or a hand-edited config with a
+    /// typo'd cron) should not start driving the target on a schedule until
+    /// someone deliberately turns it on.
+    #[serde(default)]
+    pub cron_enabled: bool,
     #[serde(default)]
     pub selectors: Selectors,
+    /// Optional post-check teardown (e.g. deleting a test conversation).
+    #[serde(default)]
+    pub cleanup: Cleanup,
     /// The string typed into `selectors.text_input` during a check.
     #[serde(default = "default_payload")]
     pub payload: String,
@@ -160,6 +211,13 @@ pub struct Config {
     /// whatever happens to be configured.
     #[serde(default = "default_interaction")]
     pub interaction: Interaction,
+    /// Claude.ai's usage-limits page, e.g. `https://claude.ai/settings/usage`.
+    ///
+    /// Unset by default — this opts the popover's usage dashboard in. Separate
+    /// from the generic check pipeline: `agent.js`'s scraper for this page is
+    /// hardcoded to claude.ai's current DOM shape, not driven by selectors.
+    #[serde(default)]
+    pub usage_url: Option<String>,
 }
 
 impl Default for Config {
@@ -167,13 +225,16 @@ impl Default for Config {
         Self {
             target_url: default_target_url(),
             cron: default_cron(),
+            cron_enabled: false,
             selectors: Selectors::default(),
+            cleanup: Cleanup::default(),
             payload: default_payload(),
             settle_ms: default_settle_ms(),
             element_timeout_ms: default_element_timeout_ms(),
             typing_delay_ms: default_typing_delay_ms(),
             notifications_enabled: true,
             interaction: default_interaction(),
+            usage_url: None,
         }
     }
 }
@@ -225,6 +286,19 @@ impl Config {
             });
         }
 
+        if let Some(usage_url) = &self.usage_url {
+            let url = url::Url::parse(usage_url).map_err(|e| ConfigError::Url {
+                url: usage_url.clone(),
+                reason: e.to_string(),
+            })?;
+            if !matches!(url.scheme(), "http" | "https") {
+                return Err(ConfigError::Url {
+                    url: usage_url.clone(),
+                    reason: format!("scheme `{}` is not http/https", url.scheme()),
+                });
+            }
+        }
+
         for (field, value) in [
             ("authenticated", &self.selectors.authenticated),
             ("login_indicator", &self.selectors.login_indicator),
@@ -237,6 +311,10 @@ impl Config {
         for (field, value) in [
             ("action_button", &self.selectors.action_button),
             ("submit_button", &self.selectors.submit_button),
+            ("response", &self.selectors.response),
+            ("cleanup.menu_button", &self.cleanup.menu_button),
+            ("cleanup.delete_option", &self.cleanup.delete_option),
+            ("cleanup.confirm_button", &self.cleanup.confirm_button),
         ] {
             if let Some(selector) = value {
                 if selector.trim().is_empty() {

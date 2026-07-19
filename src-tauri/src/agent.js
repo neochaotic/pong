@@ -15,9 +15,9 @@
     } catch (e) {}
   };
 
-  var invoke = function (payload) {
+  var invokeCommand = function (command, payload) {
     try {
-      var pending = window.__TAURI_INTERNALS__.invoke("report_health", {
+      var pending = window.__TAURI_INTERNALS__.invoke(command, {
         payload: payload,
       });
       // `invoke` rejects asynchronously (e.g. when the ACL denies the command),
@@ -30,6 +30,10 @@
     } catch (e) {
       breadcrumb(String((e && e.message) || e));
     }
+  };
+
+  var invoke = function (payload) {
+    invokeCommand("report_health", payload);
   };
 
   var sleep = function (ms) {
@@ -68,15 +72,40 @@
     return true;
   }
 
+  // A `setTimeout` poll loop is exactly the kind of callback macOS/Chromium
+  // throttle hardest on an occluded webview — Pong's hidden window by design
+  // — which can silently stretch a 100ms poll into 1s+ and blow the check's
+  // time budget. `MutationObserver` fires on DOM changes rather than a timer,
+  // so it keeps working at full speed regardless of visibility; only the
+  // final "give up" deadline still needs a single timer, and a coarse delay
+  // on that one is harmless.
   function waitForElement(selector, timeoutMs, requireInteractive) {
-    var deadline = Date.now() + (timeoutMs || 10000);
     return new Promise(function (resolve) {
-      (function poll() {
+      var settled = false;
+      var finish = function (el) {
+        if (settled) return;
+        settled = true;
+        observer.disconnect();
+        clearTimeout(deadlineTimer);
+        resolve(el);
+      };
+      var check = function () {
         var el = q(selector);
-        if (el && (!requireInteractive || isInteractive(el))) return resolve(el);
-        if (Date.now() >= deadline) return resolve(null);
-        setTimeout(poll, 100);
-      })();
+        if (el && (!requireInteractive || isInteractive(el))) finish(el);
+      };
+
+      var observer = new MutationObserver(check);
+      observer.observe(document.documentElement || document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        characterData: true,
+      });
+      var deadlineTimer = setTimeout(function () {
+        finish(null);
+      }, timeoutMs || 10000);
+
+      check();
     });
   }
 
@@ -242,6 +271,134 @@
     if (form && typeof form.requestSubmit === "function") form.requestSubmit();
   }
 
+  // --- reading the reply back out -----------------------------------------
+  //
+  // A streaming reply keeps mutating its own textContent for as long as it is
+  // generating. Waiting a fixed settle_ms and grabbing whatever is there risks
+  // capturing a half-written sentence. Instead, poll the *last* matching
+  // element and treat the text as final once it stops changing for a short
+  // stability window — cheap, and it does not depend on knowing the
+  // dashboard's own "generating" indicator.
+
+  function lastMatchText(selector) {
+    var nodes = q_all(selector);
+    if (!nodes.length) return null;
+    var el = nodes[nodes.length - 1];
+    return el.textContent || "";
+  }
+
+  function q_all(selector) {
+    if (!selector) return [];
+    try {
+      return Array.prototype.slice.call(document.querySelectorAll(selector));
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // Same throttling hazard as waitForElement: a tight setTimeout poll loop
+  // stalls hard on an occluded webview. MutationObserver reacts to the reply
+  // actually changing, so streaming keeps this responsive regardless of
+  // visibility; only the "stable for 800ms" and final deadline checks use a
+  // timer, and each is a single one-shot rather than a loop.
+  function waitForStableText(selector, timeoutMs) {
+    return new Promise(function (resolve) {
+      var settled = false;
+      var last = null;
+      var stableTimer = null;
+
+      var finish = function () {
+        if (settled) return;
+        settled = true;
+        observer.disconnect();
+        clearTimeout(stableTimer);
+        clearTimeout(deadlineTimer);
+        resolve(last ? last.trim() : null);
+      };
+
+      var check = function () {
+        var text = lastMatchText(selector);
+        if (text && text.trim() && text !== last) {
+          last = text;
+          clearTimeout(stableTimer);
+          stableTimer = setTimeout(finish, 800);
+        }
+      };
+
+      var observer = new MutationObserver(check);
+      observer.observe(document.documentElement || document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+      var deadlineTimer = setTimeout(finish, timeoutMs || 10000);
+
+      check();
+    });
+  }
+
+  // --- post-check teardown -------------------------------------------------
+  //
+  // Deletes whatever the check just created, so a monitor running every few
+  // minutes does not silently fill the dashboard with check artifacts
+  // forever. Each step only runs if configured, and every failure is
+  // reported back through the check's own detail rather than swallowed —
+  // "the check succeeded but cleanup didn't" is a distinct, worth-knowing
+  // outcome, not a check failure.
+  // One-shot diagnostic dump, used only in the failure message so a stuck
+  // cleanup step is debuggable from the History detail alone, without a
+  // separate DevTools session.
+  function diagnoseDialog() {
+    try {
+      var dialogs = document.querySelectorAll('[role="dialog"], [role="alertdialog"]');
+      var buttons = document.querySelectorAll(
+        '[role="dialog"] button, [role="alertdialog"] button'
+      );
+      var buttonTexts = Array.prototype.slice
+        .call(buttons)
+        .map(function (b) {
+          return '"' + (b.textContent || "").trim().slice(0, 20) + '"';
+        })
+        .join(",");
+      return (
+        "dialogs=" +
+        dialogs.length +
+        " buttons=" +
+        buttons.length +
+        " texts=[" +
+        buttonTexts +
+        "]"
+      );
+    } catch (e) {
+      return "diagnose failed: " + String((e && e.message) || e);
+    }
+  }
+
+  async function runCleanup(cleanup, timeoutMs) {
+    try {
+      if (cleanup.menu_button) {
+        var menu = await waitForElement(cleanup.menu_button, timeoutMs, true);
+        if (!menu) return "cleanup failed: menu button never appeared";
+        menu.click();
+      }
+      if (cleanup.delete_option) {
+        var del = await waitForElement(cleanup.delete_option, timeoutMs, true);
+        if (!del) return "cleanup failed: delete option never appeared";
+        del.click();
+      }
+      if (cleanup.confirm_button) {
+        var confirmBtn = await waitForElement(cleanup.confirm_button, timeoutMs, true);
+        if (!confirmBtn) {
+          return "cleanup failed: confirm button never appeared (" + diagnoseDialog() + ")";
+        }
+        confirmBtn.click();
+      }
+      return "cleanup: ok";
+    } catch (err) {
+      return "cleanup failed: " + String((err && err.message) || err);
+    }
+  }
+
   // An SSO hop lands the webview on an identity provider - Google, Okta, Azure.
   // Those pages hold the user's real password field, and the probe selectors
   // are meaningless there. Acting on a host we were not pointed at could type
@@ -349,10 +506,82 @@
         var post = self.probe(p);
         if (post.code === 401) return done(401, "session expired during check");
         if (post.code !== 200) return done(503, post.detail);
-        return done(200, "dashboard responded");
+
+        var detail = "dashboard responded";
+        if (p.selectors.response) {
+          var remaining = timeout - (performance.now() - started);
+          var reply = await waitForStableText(p.selectors.response, remaining);
+          detail = reply
+            ? reply.length > 300
+              ? reply.slice(0, 300) + "…"
+              : reply
+            : "dashboard responded (no reply captured within timeout)";
+        }
+
+        if (p.cleanup && (p.cleanup.menu_button || p.cleanup.delete_option || p.cleanup.confirm_button)) {
+          var remainingForCleanup = timeout - (performance.now() - started);
+          detail += " · " + (await runCleanup(p.cleanup, remainingForCleanup));
+        }
+
+        return done(200, detail);
       } catch (err) {
         return done(500, String((err && err.message) || err));
       }
+    },
+
+    // Reads claude.ai's usage-limits panel (session %, weekly %, reset
+    // countdowns). Hardcoded to that page's current DOM, not driven by
+    // config — unlike everything else here, this is not a generic dashboard
+    // check. Two things make it locale-proof, since the account's language
+    // changes the wording ("Resets in 3 hr 43 min" vs "Reinicia em 3 h 48
+    // min"): percentages are found via the universal "%" character rather
+    // than any word, and "reset" text is identified by CSS class, not by
+    // matching "Resets"/"Reinicia".
+    scrapeUsage: function (p) {
+      var result = { session_percent: null, session_reset_text: null, weekly_percent: null, weekly_reset_text: null };
+      try {
+        var allSpans = Array.prototype.slice.call(document.querySelectorAll("span"));
+
+        var percentSpans = allSpans.filter(function (el) {
+          var text = (el.textContent || "").trim();
+          return text.length > 0 && text.length < 20 && text.indexOf("%") !== -1;
+        });
+
+        // The reset-countdown spans share the same "footnote/secondary" text
+        // style as the percentage spans, minus the percentage-only sizing
+        // class — and, unlike the percentage spans, never contain "%".
+        var resetSpans = allSpans.filter(function (el) {
+          var cls = el.className;
+          if (typeof cls !== "string") return false;
+          if (cls.indexOf("text-footnote") === -1 || cls.indexOf("text-secondary") === -1) return false;
+          if (cls.indexOf("min-w-") !== -1) return false;
+          var text = (el.textContent || "").trim();
+          return text.length > 0 && text.indexOf("%") === -1;
+        });
+
+        var percentOf = function (el) {
+          if (!el) return null;
+          var m = /(\d+)\s*%/.exec(el.textContent || "");
+          return m ? Number(m[1]) : null;
+        };
+
+        // Row order on the page is session first, then the weekly ("all
+        // models") row — both lists follow that same order.
+        result.session_percent = percentOf(percentSpans[0]);
+        result.session_reset_text = resetSpans[0] ? resetSpans[0].textContent.trim() : null;
+        result.weekly_percent = percentOf(percentSpans[1]);
+        result.weekly_reset_text = resetSpans[1] ? resetSpans[1].textContent.trim() : null;
+      } catch (e) {
+        breadcrumb(String((e && e.message) || e));
+      }
+
+      invokeCommand("report_usage", {
+        session_percent: result.session_percent,
+        session_reset_text: result.session_reset_text,
+        weekly_percent: result.weekly_percent,
+        weekly_reset_text: result.weekly_reset_text,
+        nonce: p.nonce,
+      });
     },
   };
 })();

@@ -1,8 +1,10 @@
 //! The health-check pipeline: heartbeat, synthetic interaction, reporting.
 
 use crate::health::{HealthReport, Phase, ProbePayload, Verdict};
-use crate::injection::{build_check_call, build_heartbeat_call, InjectionParams};
+use crate::injection::{build_check_call, build_heartbeat_call, build_usage_call, InjectionParams};
 use crate::state::AppState;
+use crate::usage::UsageSnapshot;
+use chrono::Utc;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
@@ -17,8 +19,9 @@ pub const UPDATE_EVENT: &str = "monitor://update";
 
 /// A read-only heartbeat should answer almost instantly.
 const HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(8);
-/// Slack added on top of the configured typing + settle budget.
-const CHECK_OVERHEAD: Duration = Duration::from_secs(15);
+/// Fixed slack for IPC round-trips and JS engine overhead, on top of the
+/// configured waits below.
+const FIXED_OVERHEAD: Duration = Duration::from_secs(2);
 
 /// Broadcast the current snapshot to the popover and refresh the tray tooltip.
 pub fn emit_snapshot(app: &AppHandle, state: &AppState) {
@@ -89,12 +92,126 @@ pub async fn run_health_check(app: AppHandle, state: Arc<AppState>) {
     finish(&app, &state, report_from_probe(outcome, budget));
 }
 
-/// How long a full check may take: typing + settle + fixed overhead.
+/// How long a full check may take: typing + settle + the element waits the
+/// agent can spend, plus fixed overhead.
+///
+/// The agent waits up to `element_timeout_ms` for the text input and (when
+/// configured) the submit button — counted once, since those two waits are
+/// mostly the same "has the SPA mounted yet" window rather than independent
+/// worst cases. Each of these adds one more fully independent wait of up to
+/// `element_timeout_ms`, because each runs only after the previous one
+/// resolves — budgeting fewer passes than the agent can actually take would
+/// let this timeout fire while it is still legitimately working:
+/// - `selectors.response` (waiting for the reply to stabilize)
+/// - `cleanup.menu_button`, `cleanup.delete_option`, `cleanup.confirm_button`
+///   (each an independent step of the post-check teardown)
 fn check_budget(cfg: &crate::config::Config) -> Duration {
     let typing = cfg
         .typing_delay_ms
         .saturating_mul(cfg.payload.chars().count() as u64);
-    Duration::from_millis(typing + cfg.settle_ms) + CHECK_OVERHEAD
+
+    let mut wait_passes: u64 = 1; // text_input (+ submit_button, counted together)
+    if cfg.selectors.response.is_some() {
+        wait_passes += 1;
+    }
+    if cfg.cleanup.menu_button.is_some() {
+        wait_passes += 1;
+    }
+    if cfg.cleanup.delete_option.is_some() {
+        wait_passes += 1;
+    }
+    if cfg.cleanup.confirm_button.is_some() {
+        wait_passes += 1;
+    }
+    let element_waits = cfg.element_timeout_ms.saturating_mul(wait_passes);
+
+    Duration::from_millis(typing + cfg.settle_ms + element_waits) + FIXED_OVERHEAD
+}
+
+/// How long a read-only usage scrape may take, including navigation.
+const USAGE_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long to let the usage page render before evaluating the scraper —
+/// there is no known-good marker element to poll for, unlike the generic
+/// check pipeline.
+const USAGE_SETTLE: Duration = Duration::from_millis(2500);
+
+/// Navigate the hidden webview to claude.ai's usage panel, scrape it, and
+/// navigate back to the configured target — under the same exclusivity guard
+/// as a health check, since both drive the same webview and a cron tick
+/// landing mid-scrape would otherwise type into the wrong page.
+pub async fn run_usage_check(app: AppHandle, state: Arc<AppState>) {
+    let Some(usage_url) = state.config_snapshot().usage_url else {
+        log::debug!("usage check skipped: usage_url not configured");
+        return;
+    };
+
+    let Some(_guard) = state.try_begin_check() else {
+        log::debug!("usage check skipped: a check is already in flight");
+        return;
+    };
+
+    let Some(webview) = app.get_webview_window(MONITOR_LABEL) else {
+        state.record_usage_result(Err("monitor webview is not running".into()), 0);
+        emit_snapshot(&app, &state);
+        return;
+    };
+
+    let started = std::time::Instant::now();
+    let target_url = state.config_snapshot().target_url;
+
+    let result = scrape_usage(&webview, &state, &usage_url).await;
+
+    // Always return to the configured target, regardless of outcome, so the
+    // health-check pipeline resumes on the right page.
+    if let Ok(url) = target_url.parse() {
+        let _ = webview.navigate(url);
+    }
+
+    let latency_ms = started.elapsed().as_millis() as u64;
+    match &result {
+        Ok(snapshot) => log::info!(
+            "usage check finished: session {}% weekly {}% ({}ms)",
+            snapshot.session_percent,
+            snapshot.weekly_percent,
+            latency_ms
+        ),
+        Err(reason) => log::warn!("usage check failed: {reason} ({latency_ms}ms)"),
+    }
+    state.record_usage_result(result, latency_ms);
+
+    emit_snapshot(&app, &state);
+}
+
+async fn scrape_usage(
+    webview: &WebviewWindow,
+    state: &AppState,
+    usage_url: &str,
+) -> Result<UsageSnapshot, String> {
+    let url = usage_url
+        .parse()
+        .map_err(|e| format!("invalid usage_url: {e}"))?;
+    webview
+        .navigate(url)
+        .map_err(|e| format!("navigation to usage page failed: {e}"))?;
+
+    tokio::time::sleep(USAGE_SETTLE).await;
+
+    let nonce = state.next_nonce();
+    let rx = state.expect_usage_report(nonce);
+    if let Err(e) = webview.eval(build_usage_call(nonce)) {
+        state.forget_usage_report(nonce);
+        return Err(format!("injection failed: {e}"));
+    }
+
+    let payload = match tokio::time::timeout(USAGE_TIMEOUT, rx).await {
+        Ok(Ok(payload)) => payload,
+        _ => {
+            state.forget_usage_report(nonce);
+            return Err("usage scrape timed out".into());
+        }
+    };
+
+    payload.into_snapshot(Utc::now())
 }
 
 #[derive(Debug)]
@@ -321,21 +438,24 @@ mod tests {
     use crate::config::Config;
 
     #[test]
-    fn budget_covers_typing_plus_settle_plus_overhead() {
+    fn budget_covers_typing_plus_settle_plus_element_wait_plus_overhead() {
         let cfg =
             Config::from_json(r##"{"payload":"ping","typing_delay_ms":100,"settle_ms":3000}"##)
                 .unwrap();
-        // 4 chars * 100ms + 3000ms + 15s overhead
+        // 4 chars * 100ms + 3000ms + default 10s element wait + 2s overhead
         assert_eq!(
             check_budget(&cfg),
-            Duration::from_millis(3400) + CHECK_OVERHEAD
+            Duration::from_millis(3400) + Duration::from_millis(10_000) + FIXED_OVERHEAD
         );
     }
 
     #[test]
     fn budget_handles_an_empty_payload() {
         let cfg = Config::from_json(r##"{"payload":"","settle_ms":0}"##).unwrap();
-        assert_eq!(check_budget(&cfg), CHECK_OVERHEAD);
+        assert_eq!(
+            check_budget(&cfg),
+            Duration::from_millis(10_000) + FIXED_OVERHEAD
+        );
     }
 
     #[test]
@@ -344,7 +464,36 @@ mod tests {
             .unwrap();
         assert_eq!(
             check_budget(&cfg),
-            Duration::from_millis(50) + CHECK_OVERHEAD
+            Duration::from_millis(50) + Duration::from_millis(10_000) + FIXED_OVERHEAD
+        );
+    }
+
+    #[test]
+    fn budget_doubles_the_element_wait_when_a_response_selector_is_configured() {
+        let cfg = Config::from_json(
+            r##"{"payload":"","settle_ms":0,"element_timeout_ms":5000,
+                 "selectors":{"response":".reply"}}"##,
+        )
+        .unwrap();
+        // One wait for the text input/submit button, a second independent one
+        // for the reply to stabilize.
+        assert_eq!(
+            check_budget(&cfg),
+            Duration::from_millis(10_000) + FIXED_OVERHEAD
+        );
+    }
+
+    #[test]
+    fn budget_adds_one_wait_pass_per_configured_cleanup_step() {
+        let cfg = Config::from_json(
+            r##"{"payload":"","settle_ms":0,"element_timeout_ms":5000,
+                 "cleanup":{"menu_button":"a","delete_option":"b","confirm_button":"c"}}"##,
+        )
+        .unwrap();
+        // 1 (text input) + 3 (menu, delete, confirm) = 4 passes.
+        assert_eq!(
+            check_budget(&cfg),
+            Duration::from_millis(20_000) + FIXED_OVERHEAD
         );
     }
 

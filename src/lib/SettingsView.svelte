@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { toConfig, toForm, validateForm, type FormState } from "./configForm";
+  import { DEFAULT_CRON, toConfig, toForm, validateForm, type FormState } from "./configForm";
+  import Toggle from "./Toggle.svelte";
   import type { Config } from "./types";
 
   let {
@@ -41,17 +42,32 @@
     if (failure) errors = [failure];
   }
 
+  /** A cron-shaped complaint from either validator, lower-cased for matching. */
+  function hasCronError(messages: string[]): boolean {
+    return messages.some((m) => m.toLowerCase().includes("cron"));
+  }
+
   async function save() {
     // Validate locally first so typos never cost a round trip.
     errors = validateForm(form);
-    if (errors.length > 0) return;
+    if (errors.length > 0) {
+      // A cron the parser can't schedule is worse than useless left in the
+      // box — reset it to a known-good default so the very next click on
+      // Save succeeds, instead of the user re-typing it by hand.
+      if (hasCronError(errors)) form.cron = DEFAULT_CRON;
+      return;
+    }
 
     saving = true;
     const failure = await onSave(toConfig(form));
     saving = false;
 
-    if (failure) errors = [failure];
-    else onClose();
+    if (failure) {
+      errors = [failure];
+      if (hasCronError(errors)) form.cron = DEFAULT_CRON;
+    } else {
+      onClose();
+    }
   }
 
   const field =
@@ -66,9 +82,21 @@
     <input class={field} data-testid="field-target_url" bind:value={form.target_url} spellcheck="false" />
   </div>
 
-  <div class="flex flex-col gap-1">
-    <span class={label}>CRON (6 FIELDS)</span>
-    <input class={field} data-testid="field-cron" bind:value={form.cron} spellcheck="false" />
+  <div class="flex flex-col gap-2">
+    <Toggle
+      testid="field-cron_enabled"
+      checked={form.cron_enabled}
+      onChange={(v) => (form.cron_enabled = v)}
+      label="RUN ON SCHEDULE"
+      hint="Off by default. Nothing runs until you turn this on."
+    />
+    <div class="flex flex-col gap-1">
+      <span class={label}>CRON (6 FIELDS)</span>
+      <input class={field} data-testid="field-cron" bind:value={form.cron} spellcheck="false" />
+      <span class="font-mono text-[9px] leading-snug text-fog">
+        Default: 5am, Monday–Friday. An invalid cron resets to this on save.
+      </span>
+    </div>
   </div>
 
   <div class="flex flex-col gap-1">
@@ -100,6 +128,62 @@
   </div>
 
   <div class="flex flex-col gap-1">
+    <span class={label}>RESPONSE SELECTOR (OPTIONAL)</span>
+    <input class={field} data-testid="field-response" bind:value={form.response} spellcheck="false" />
+    <span class="font-mono text-[9px] leading-snug text-fog">
+      Matches each reply bubble. The last one's text becomes the check's detail once it
+      stops changing. Leave empty to just report "dashboard responded".
+    </span>
+  </div>
+
+  <div class="flex flex-col gap-1 border-t border-line pt-3">
+    <span class={label}>CLEANUP (OPTIONAL)</span>
+    <span class="font-mono text-[9px] leading-snug text-fog">
+      Deletes what the check just created, run only after a successful interaction. Each
+      step runs only if set — leave a step empty to skip it.
+    </span>
+  </div>
+
+  <div class="flex flex-col gap-1">
+    <span class={label}>CLEANUP: MENU BUTTON</span>
+    <input
+      class={field}
+      data-testid="field-cleanup_menu_button"
+      bind:value={form.cleanup_menu_button}
+      spellcheck="false"
+    />
+  </div>
+
+  <div class="flex flex-col gap-1">
+    <span class={label}>CLEANUP: DELETE OPTION</span>
+    <input
+      class={field}
+      data-testid="field-cleanup_delete_option"
+      bind:value={form.cleanup_delete_option}
+      spellcheck="false"
+    />
+  </div>
+
+  <div class="flex flex-col gap-1">
+    <span class={label}>CLEANUP: CONFIRM BUTTON</span>
+    <input
+      class={field}
+      data-testid="field-cleanup_confirm_button"
+      bind:value={form.cleanup_confirm_button}
+      spellcheck="false"
+    />
+  </div>
+
+  <div class="flex flex-col gap-1 border-t border-line pt-3">
+    <span class={label}>USAGE PAGE URL (OPTIONAL)</span>
+    <input class={field} data-testid="field-usage_url" bind:value={form.usage_url} spellcheck="false" />
+    <span class="font-mono text-[9px] leading-snug text-fog">
+      claude.ai's usage-limits page, e.g. https://claude.ai/settings/usage. Leave empty to
+      hide the dash's usage numbers.
+    </span>
+  </div>
+
+  <div class="flex flex-col gap-1">
     <span class={label}>PAYLOAD</span>
     <input class={field} data-testid="field-payload" bind:value={form.payload} spellcheck="false" />
   </div>
@@ -123,26 +207,20 @@
     </span>
   </div>
 
-  <label class="flex items-center gap-2">
-    <input
-      type="checkbox"
-      data-testid="field-notifications" bind:checked={form.notifications_enabled}
-      class="size-3 accent-signal"
-    />
-    <span class="font-mono text-[10px] text-fog">Notify on session expiry</span>
-  </label>
+  <Toggle
+    testid="field-notifications"
+    checked={form.notifications_enabled}
+    onChange={(v) => (form.notifications_enabled = v)}
+    label="NOTIFY ON SESSION EXPIRY"
+  />
 
-  <label class="flex items-start gap-2">
-    <input
-      type="checkbox"
-      data-testid="field-probe_only"
-      bind:checked={form.probe_only}
-      class="mt-0.5 size-3 accent-signal"
-    />
-    <span class="font-mono text-[10px] leading-snug text-fog">
-      Probe only — check the session without clicking or typing
-    </span>
-  </label>
+  <Toggle
+    testid="field-probe_only"
+    checked={form.probe_only}
+    onChange={(v) => (form.probe_only = v)}
+    label="PROBE ONLY"
+    hint="Check the session without clicking or typing."
+  />
 
   <div class="flex flex-col gap-1 border-t border-line pt-3">
     <span class={label}>SESSION</span>

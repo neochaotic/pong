@@ -6,5 +6,5 @@
   "remote": {
     "urls": ["http://*:*/*", "https://*:*/*", "http://*/*", "https://*/*"]
   },
-  "permissions": ["allow-report-health"]
+  "permissions": ["allow-report-health", "allow-report-usage"]
 }

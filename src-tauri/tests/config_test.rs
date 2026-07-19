@@ -1,6 +1,7 @@
 //! TDD suite for configuration parsing and validation.
 
 use pongllm_lib::config::{Config, ConfigError, Interaction};
+use std::str::FromStr;
 
 const FULL: &str = r##"{
   "target_url": "https://dash.internal/login",
@@ -29,6 +30,30 @@ fn parses_a_fully_specified_config() {
     assert_eq!(cfg.payload, "ping");
     assert_eq!(cfg.settle_ms, 3000);
     assert!(cfg.notifications_enabled);
+}
+
+#[test]
+fn cron_is_disabled_by_default() {
+    // A fresh install (or a hand-edited config that dropped this field)
+    // must not start driving the target on a schedule unasked.
+    let cfg = Config::from_json("{}").unwrap();
+    assert!(!cfg.cron_enabled);
+}
+
+#[test]
+fn default_cron_is_weekday_mornings_and_parses() {
+    let cfg = Config::from_json("{}").unwrap();
+    assert_eq!(cfg.cron, "0 0 5 * * Mon-Fri");
+    // The default must itself be schedulable, or a fresh install would
+    // reject its own defaults the moment cron_enabled is switched on.
+    assert!(cron::Schedule::from_str(&cfg.cron).is_ok());
+}
+
+#[test]
+fn cron_enabled_can_be_configured() {
+    let raw = r##"{"cron_enabled": true}"##;
+    let cfg = Config::from_json(raw).unwrap();
+    assert!(cfg.cron_enabled);
 }
 
 #[test]
@@ -142,6 +167,86 @@ fn rejects_an_empty_submit_button_selector() {
         matches!(err, ConfigError::EmptySelector { field } if field == "submit_button"),
         "got {err:?}"
     );
+}
+
+#[test]
+fn response_is_optional_and_defaults_to_none() {
+    let cfg = Config::from_json("{}").unwrap();
+    assert_eq!(cfg.selectors.response, None);
+}
+
+#[test]
+fn response_can_be_configured() {
+    let raw = r##"{"selectors":{"response":"[data-testid=\"assistant-message\"]"}}"##;
+    let cfg = Config::from_json(raw).unwrap();
+    assert_eq!(
+        cfg.selectors.response.as_deref(),
+        Some(r##"[data-testid="assistant-message"]"##)
+    );
+}
+
+#[test]
+fn rejects_an_empty_response_selector() {
+    let raw = r##"{"selectors":{"response":"  "}}"##;
+    let err = Config::from_json(raw).expect_err("blank selector must be rejected");
+    assert!(
+        matches!(err, ConfigError::EmptySelector { field } if field == "response"),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn cleanup_is_optional_and_defaults_to_unconfigured() {
+    let cfg = Config::from_json("{}").unwrap();
+    assert_eq!(cfg.cleanup.menu_button, None);
+    assert_eq!(cfg.cleanup.delete_option, None);
+    assert_eq!(cfg.cleanup.confirm_button, None);
+    assert!(!cfg.cleanup.is_configured());
+}
+
+#[test]
+fn cleanup_can_be_partially_configured() {
+    let raw = r##"{"cleanup":{"delete_option":"[data-testid=\"delete-chat-trigger\"]"}}"##;
+    let cfg = Config::from_json(raw).unwrap();
+    assert_eq!(cfg.cleanup.menu_button, None);
+    assert_eq!(
+        cfg.cleanup.delete_option.as_deref(),
+        Some(r##"[data-testid="delete-chat-trigger"]"##)
+    );
+    assert!(cfg.cleanup.is_configured());
+}
+
+#[test]
+fn rejects_an_empty_cleanup_selector() {
+    let raw = r##"{"cleanup":{"menu_button":"  "}}"##;
+    let err = Config::from_json(raw).expect_err("blank selector must be rejected");
+    assert!(
+        matches!(err, ConfigError::EmptySelector { field } if field == "cleanup.menu_button"),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn usage_url_is_optional_and_defaults_to_none() {
+    let cfg = Config::from_json("{}").unwrap();
+    assert_eq!(cfg.usage_url, None);
+}
+
+#[test]
+fn usage_url_can_be_configured() {
+    let raw = r##"{"usage_url":"https://claude.ai/settings/usage"}"##;
+    let cfg = Config::from_json(raw).unwrap();
+    assert_eq!(
+        cfg.usage_url.as_deref(),
+        Some("https://claude.ai/settings/usage")
+    );
+}
+
+#[test]
+fn rejects_a_non_http_usage_url() {
+    let raw = r##"{"usage_url":"file:///etc/passwd"}"##;
+    let err = Config::from_json(raw).expect_err("non-http usage_url must be rejected");
+    assert!(matches!(err, ConfigError::Url { .. }), "got {err:?}");
 }
 
 #[test]

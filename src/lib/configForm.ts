@@ -9,6 +9,7 @@ import type { Config } from "./types";
 export interface FormState {
   target_url: string;
   cron: string;
+  cron_enabled: boolean;
   payload: string;
   settle_ms: string;
   typing_delay_ms: string;
@@ -18,6 +19,11 @@ export interface FormState {
   action_button: string;
   text_input: string;
   submit_button: string;
+  response: string;
+  cleanup_menu_button: string;
+  cleanup_delete_option: string;
+  cleanup_confirm_button: string;
+  usage_url: string;
   notifications_enabled: boolean;
   probe_only: boolean;
 }
@@ -27,10 +33,14 @@ export const MAX_SETTLE_MS = 60_000;
 export const MAX_TYPING_DELAY_MS = 2_000;
 export const MAX_ELEMENT_TIMEOUT_MS = 120_000;
 
+/** Mirrors `config::default_cron` — 5am, Monday through Friday. */
+export const DEFAULT_CRON = "0 0 5 * * Mon-Fri";
+
 export function toForm(config: Config): FormState {
   return {
     target_url: config.target_url,
     cron: config.cron,
+    cron_enabled: config.cron_enabled,
     payload: config.payload,
     settle_ms: String(config.settle_ms),
     typing_delay_ms: String(config.typing_delay_ms),
@@ -40,6 +50,11 @@ export function toForm(config: Config): FormState {
     action_button: config.selectors.action_button ?? "",
     text_input: config.selectors.text_input,
     submit_button: config.selectors.submit_button ?? "",
+    response: config.selectors.response ?? "",
+    cleanup_menu_button: config.cleanup.menu_button ?? "",
+    cleanup_delete_option: config.cleanup.delete_option ?? "",
+    cleanup_confirm_button: config.cleanup.confirm_button ?? "",
+    usage_url: config.usage_url ?? "",
     notifications_enabled: config.notifications_enabled,
     probe_only: config.interaction === "probe_only",
   };
@@ -49,6 +64,7 @@ export function toConfig(form: FormState): Config {
   return {
     target_url: form.target_url.trim(),
     cron: form.cron.trim(),
+    cron_enabled: form.cron_enabled,
     payload: form.payload,
     settle_ms: Number(form.settle_ms),
     typing_delay_ms: Number(form.typing_delay_ms),
@@ -60,7 +76,16 @@ export function toConfig(form: FormState): Config {
       action_button: form.action_button.trim() === "" ? null : form.action_button.trim(),
       text_input: form.text_input.trim(),
       submit_button: form.submit_button.trim() === "" ? null : form.submit_button.trim(),
+      response: form.response.trim() === "" ? null : form.response.trim(),
     },
+    cleanup: {
+      menu_button: form.cleanup_menu_button.trim() === "" ? null : form.cleanup_menu_button.trim(),
+      delete_option:
+        form.cleanup_delete_option.trim() === "" ? null : form.cleanup_delete_option.trim(),
+      confirm_button:
+        form.cleanup_confirm_button.trim() === "" ? null : form.cleanup_confirm_button.trim(),
+    },
+    usage_url: form.usage_url.trim() === "" ? null : form.usage_url.trim(),
     notifications_enabled: form.notifications_enabled,
     interaction: form.probe_only ? "probe_only" : "full",
   };

@@ -17,7 +17,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2.11", features = ["tray-icon", "macos-private-api", "image-png"] }
+tauri = { version = "2.11", features = ["tray-icon", "macos-private-api", "image-png", "devtools"] }
 tauri-plugin-notification = "2"
 tauri-plugin-log = "2"
 serde = { version = "1", features = ["derive"] }
@@ -32,6 +32,13 @@ thiserror = "2"
 url = "2"
 uuid = "1"
 log = "0.4"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Opts the process out of App Nap (see disable_app_nap in lib.rs): a
+# tray-only app has no visible window most of the time, which is exactly
+# when macOS throttles background CPU/timers hardest — reaching into the
+# hidden webview's JS execution and stretching checks past their budget.
+objc2-foundation = { version = "0.3", features = ["NSProcessInfo", "NSString"] }
 
 [dev-dependencies]
 tempfile = "3"

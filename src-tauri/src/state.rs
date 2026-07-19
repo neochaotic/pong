@@ -3,6 +3,7 @@
 use crate::config::Config;
 use crate::health::{HealthReport, Phase, ProbePayload};
 use crate::scheduler;
+use crate::usage::{UsageLogEntry, UsageProbePayload, UsageSnapshot};
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
@@ -35,7 +36,11 @@ pub struct MonitorSnapshot {
     pub phase: Phase,
     pub target_url: String,
     pub cron: String,
-    /// Unix seconds of the next scheduled check, if the cron is valid.
+    /// Whether the cron schedule is actually running.
+    #[serde(default)]
+    pub cron_enabled: bool,
+    /// Unix seconds of the next scheduled check, if the cron is valid and
+    /// enabled.
     pub next_run_unix: Option<i64>,
     /// Seconds remaining until that run — the UI ticks this down locally.
     pub seconds_until_next: Option<i64>,
@@ -73,6 +78,12 @@ pub struct AppState {
     pending: Mutex<HashMap<u64, oneshot::Sender<ProbePayload>>>,
     /// Guards against two checks typing into the dashboard at once.
     running: AtomicBool,
+    /// Most recently scraped claude.ai usage panel, if any.
+    usage: Mutex<Option<UsageSnapshot>>,
+    /// Most recent usage-scrape attempts, newest first.
+    usage_history: Mutex<VecDeque<UsageLogEntry>>,
+    /// Usage probes waiting for their report to come back from the webview.
+    pending_usage: Mutex<HashMap<u64, oneshot::Sender<UsageProbePayload>>>,
 }
 
 impl AppState {
@@ -87,6 +98,9 @@ impl AppState {
             nonce: AtomicU64::new(1),
             pending: Mutex::new(HashMap::new()),
             running: AtomicBool::new(false),
+            usage: Mutex::new(None),
+            usage_history: Mutex::new(VecDeque::with_capacity(HISTORY_LIMIT)),
+            pending_usage: Mutex::new(HashMap::new()),
         }
     }
 
@@ -177,15 +191,84 @@ impl AppState {
         lock(&self.pending).remove(&nonce);
     }
 
+    /// Register interest in the usage report for `nonce`.
+    pub fn expect_usage_report(&self, nonce: u64) -> oneshot::Receiver<UsageProbePayload> {
+        let (tx, rx) = oneshot::channel();
+        lock(&self.pending_usage).insert(nonce, tx);
+        rx
+    }
+
+    /// Route an incoming usage report to whoever is waiting for it.
+    pub fn resolve_usage_report(&self, payload: UsageProbePayload) -> bool {
+        let waiter = lock(&self.pending_usage).remove(&payload.nonce);
+        match waiter {
+            Some(tx) => tx.send(payload).is_ok(),
+            None => false,
+        }
+    }
+
+    /// Stop waiting for a usage report (used when a probe times out).
+    pub fn forget_usage_report(&self, nonce: u64) {
+        lock(&self.pending_usage).remove(&nonce);
+    }
+
+    /// The most recently scraped usage panel, if any check has ever succeeded.
+    pub fn usage_snapshot(&self) -> Option<UsageSnapshot> {
+        lock(&self.usage).clone()
+    }
+
+    /// Record the outcome of a usage-scrape attempt: on success, updates the
+    /// live snapshot; either way, appends to the bounded history.
+    pub fn record_usage_result(&self, result: Result<UsageSnapshot, String>, latency_ms: u64) {
+        let entry = match &result {
+            Ok(snapshot) => UsageLogEntry {
+                ok: true,
+                detail: format!(
+                    "session {}% · weekly {}%",
+                    snapshot.session_percent, snapshot.weekly_percent
+                ),
+                latency_ms,
+                at: Utc::now(),
+            },
+            Err(reason) => UsageLogEntry {
+                ok: false,
+                detail: reason.clone(),
+                latency_ms,
+                at: Utc::now(),
+            },
+        };
+
+        if let Ok(snapshot) = result {
+            *lock(&self.usage) = Some(snapshot);
+        }
+
+        let mut history = lock(&self.usage_history);
+        history.push_front(entry);
+        while history.len() > HISTORY_LIMIT {
+            history.pop_back();
+        }
+    }
+
+    /// Past usage-scrape attempts, newest first.
+    pub fn usage_history(&self) -> Vec<UsageLogEntry> {
+        lock(&self.usage_history).iter().cloned().collect()
+    }
+
     pub fn snapshot(&self) -> MonitorSnapshot {
         let cfg = self.config_snapshot();
         let now = Utc::now();
-        let next: Option<DateTime<Utc>> = scheduler::next_occurrence(&cfg.cron, now);
+        // No job is installed while disabled, so there is no "next run" to
+        // project — showing one anyway would promise a check that never comes.
+        let next: Option<DateTime<Utc>> = cfg
+            .cron_enabled
+            .then(|| scheduler::next_occurrence(&cfg.cron, now))
+            .flatten();
 
         MonitorSnapshot {
             phase: self.phase(),
             target_url: cfg.target_url,
             cron: cfg.cron,
+            cron_enabled: cfg.cron_enabled,
             next_run_unix: next.map(|t| t.timestamp()),
             seconds_until_next: next.map(|t| (t - now).num_seconds().max(0)),
             last_report: lock(&self.last_report).clone(),
@@ -337,6 +420,10 @@ mod tests {
         assert_eq!(state.phase(), Phase::Ready);
         state.set_phase(Phase::Pinging);
         assert_eq!(state.phase(), Phase::Pinging);
+        state.set_config(Config {
+            cron_enabled: true,
+            ..Config::default()
+        });
         assert!(state.snapshot().next_run_unix.is_some());
     }
 
@@ -371,14 +458,107 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_projects_the_schedule() {
+    fn snapshot_has_no_next_run_while_cron_is_disabled() {
+        // The default config ships with cron_enabled: false — no job is
+        // installed, so there is nothing to project.
         let s = state();
         let snap = s.snapshot();
-        assert!(
-            snap.next_run_unix.is_some(),
-            "default cron must be schedulable"
-        );
-        assert!(snap.seconds_until_next.unwrap() <= 15 * 60);
+        assert!(!snap.cron_enabled);
+        assert!(snap.next_run_unix.is_none());
+        assert!(snap.seconds_until_next.is_none());
         assert_eq!(snap.target_url, Config::default().target_url);
+    }
+
+    #[test]
+    fn snapshot_projects_the_schedule_once_enabled() {
+        let s = state();
+        s.set_config(Config {
+            cron_enabled: true,
+            cron: "0 */15 * * * *".into(),
+            ..Config::default()
+        });
+
+        let snap = s.snapshot();
+        assert!(snap.next_run_unix.is_some());
+        assert!(snap.seconds_until_next.unwrap() <= 15 * 60);
+    }
+
+    #[tokio::test]
+    async fn a_usage_report_reaches_the_waiting_probe() {
+        let s = state();
+        let nonce = s.next_nonce();
+        let rx = s.expect_usage_report(nonce);
+
+        let delivered = s.resolve_usage_report(UsageProbePayload {
+            session_percent: Some(26),
+            session_reset_text: Some("Resets in 3 hr 43 min".into()),
+            weekly_percent: Some(40),
+            weekly_reset_text: Some("Resets in 7 hr 23 min".into()),
+            nonce,
+        });
+
+        assert!(delivered);
+        assert_eq!(rx.await.unwrap().session_percent, Some(26));
+    }
+
+    #[test]
+    fn usage_starts_empty() {
+        let s = state();
+        assert_eq!(s.usage_snapshot(), None);
+        assert!(s.usage_history().is_empty());
+    }
+
+    #[test]
+    fn a_successful_usage_result_updates_the_snapshot_and_history() {
+        let s = state();
+        let now = Utc::now();
+        let snapshot = UsageSnapshot {
+            session_percent: 26,
+            session_reset_at: now,
+            weekly_percent: 40,
+            weekly_reset_at: now,
+            fetched_at: now,
+        };
+
+        s.record_usage_result(Ok(snapshot.clone()), 500);
+
+        assert_eq!(s.usage_snapshot(), Some(snapshot));
+        let history = s.usage_history();
+        assert_eq!(history.len(), 1);
+        assert!(history[0].ok);
+    }
+
+    #[test]
+    fn a_failed_usage_result_is_logged_without_touching_the_last_snapshot() {
+        let s = state();
+        let now = Utc::now();
+        let snapshot = UsageSnapshot {
+            session_percent: 26,
+            session_reset_at: now,
+            weekly_percent: 40,
+            weekly_reset_at: now,
+            fetched_at: now,
+        };
+        s.record_usage_result(Ok(snapshot.clone()), 500);
+
+        s.record_usage_result(Err("weekly percent not found".into()), 300);
+
+        assert_eq!(
+            s.usage_snapshot(),
+            Some(snapshot),
+            "a failed scrape must not clobber the last good reading"
+        );
+        let history = s.usage_history();
+        assert_eq!(history.len(), 2, "both attempts are logged");
+        assert!(!history[0].ok, "the newest entry is the failure");
+    }
+
+    #[test]
+    fn usage_history_is_bounded() {
+        let s = state();
+        for _ in 0..(HISTORY_LIMIT + 10) {
+            s.record_usage_result(Err("scrape failed".into()), 1);
+        }
+        assert_eq!(s.usage_history().len(), HISTORY_LIMIT);
     }
 }

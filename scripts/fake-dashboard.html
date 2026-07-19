@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Fake Dashboard</title>
+</head>
+<body>
+  <div id="dashboard-main">
+    <textarea id="prompt" rows="3" cols="40"></textarea>
+    <br />
+    <button id="send">Send</button>
+    <div id="replies"></div>
+  </div>
+
+  <script>
+    var words = "Sure — here is a simulated streaming reply so Pong can prove it waits for the text to settle before capturing it.".split(" ");
+
+    document.getElementById("send").addEventListener("click", function () {
+      var bubble = document.createElement("div");
+      bubble.className = "reply";
+      document.getElementById("replies").appendChild(bubble);
+
+      var i = 0;
+      var timer = setInterval(function () {
+        bubble.textContent = words.slice(0, i + 1).join(" ");
+        i++;
+        if (i >= words.length) clearInterval(timer);
+      }, 150);
+    });
+  </script>
+</body>
+</html>

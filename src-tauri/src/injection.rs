@@ -4,7 +4,7 @@
 //! `serde_json`-encoded object literal, so escaping is handled by the serializer
 //! rather than by hand-rolled string concatenation.
 
-use crate::config::{Config, Selectors};
+use crate::config::{Cleanup, Config, Selectors};
 
 /// The probe agent, installed once per navigation via `initialization_script`.
 pub const AGENT_SCRIPT: &str = include_str!("agent.js");
@@ -15,6 +15,8 @@ pub struct InjectionParams {
     /// Host of the configured target. The agent refuses to act anywhere else.
     pub expected_host: String,
     pub selectors: Selectors,
+    /// Optional post-check teardown, run only after a successful interaction.
+    pub cleanup: Cleanup,
     pub payload: String,
     pub settle_ms: u64,
     pub typing_delay_ms: u64,
@@ -32,6 +34,7 @@ impl InjectionParams {
                 .and_then(|u| u.host_str().map(str::to_owned))
                 .unwrap_or_default(),
             selectors: cfg.selectors.clone(),
+            cleanup: cfg.cleanup.clone(),
             payload: cfg.payload.clone(),
             settle_ms: cfg.settle_ms,
             typing_delay_ms: cfg.typing_delay_ms,
@@ -64,6 +67,19 @@ fn build_call(method: &str, params: &InjectionParams) -> String {
     )
 }
 
+/// Evaluate the claude.ai usage-panel scraper. Independent of `InjectionParams`
+/// — the scraper needs nothing but a nonce to correlate its report.
+pub fn build_usage_call(nonce: u64) -> String {
+    format!(
+        "(function(){{var p={{nonce:{nonce}}};\
+         if(window.__PONG__&&window.__PONG__.scrapeUsage){{window.__PONG__.scrapeUsage(p);}}\
+         else{{try{{window.__TAURI_INTERNALS__.invoke('report_usage',\
+         {{payload:{{session_percent:null,session_reset_text:null,\
+         weekly_percent:null,weekly_reset_text:null,nonce:p.nonce}}}});\
+         }}catch(e){{}}}}}})()"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,7 +93,9 @@ mod tests {
                 action_button: None,
                 text_input: text_input.into(),
                 submit_button: None,
+                response: None,
             },
+            cleanup: Cleanup::default(),
             payload: payload.into(),
             settle_ms: 3000,
             typing_delay_ms: 60,
@@ -91,6 +109,7 @@ mod tests {
         assert!(AGENT_SCRIPT.contains("window.__PONG__"));
         assert!(AGENT_SCRIPT.contains("runCheck"));
         assert!(AGENT_SCRIPT.contains("heartbeat"));
+        assert!(AGENT_SCRIPT.contains("scrapeUsage"));
     }
 
     #[test]
@@ -150,10 +169,68 @@ mod tests {
     }
 
     #[test]
+    fn omits_response_when_unset() {
+        let js = build_check_call(&params_with("ping", "textarea"));
+        assert!(js.contains("\"response\":null"), "{js}");
+    }
+
+    #[test]
+    fn includes_response_when_set() {
+        let mut p = params_with("ping", "textarea");
+        p.selectors.response = Some("[data-testid=\"assistant-message\"]".into());
+        let js = build_check_call(&p);
+        assert!(
+            js.contains(r#""response":"[data-testid=\"assistant-message\"]""#),
+            "{js}"
+        );
+    }
+
+    #[test]
+    fn omits_cleanup_fields_when_unset() {
+        let js = build_check_call(&params_with("ping", "textarea"));
+        assert!(
+            js.contains(
+                r#""cleanup":{"menu_button":null,"delete_option":null,"confirm_button":null}"#
+            ),
+            "{js}"
+        );
+    }
+
+    #[test]
+    fn includes_cleanup_fields_when_set() {
+        let mut p = params_with("ping", "textarea");
+        p.cleanup = Cleanup {
+            menu_button: Some("[data-testid=\"page-header\"] button".into()),
+            delete_option: Some("[data-testid=\"delete-chat-trigger\"]".into()),
+            confirm_button: Some(".text-on-danger".into()),
+        };
+        let js = build_check_call(&p);
+        assert!(
+            js.contains(r#""delete_option":"[data-testid=\"delete-chat-trigger\"]""#),
+            "{js}"
+        );
+        assert!(js.contains(r#""confirm_button":".text-on-danger""#), "{js}");
+    }
+
+    #[test]
     fn falls_back_to_reporting_when_agent_is_missing() {
         let js = build_check_call(&params_with("ping", "textarea"));
         assert!(js.contains("probe agent not installed"), "{js}");
         assert!(js.contains("code:0"), "{js}");
+    }
+
+    #[test]
+    fn usage_call_targets_scrape_usage() {
+        let js = build_usage_call(7);
+        assert!(js.contains("window.__PONG__.scrapeUsage(p)"), "{js}");
+        assert!(js.contains("nonce:7"), "{js}");
+    }
+
+    #[test]
+    fn usage_call_falls_back_to_reporting_when_agent_is_missing() {
+        let js = build_usage_call(1);
+        assert!(js.contains("report_usage"), "{js}");
+        assert!(js.contains("session_percent:null"), "{js}");
     }
 
     #[test]

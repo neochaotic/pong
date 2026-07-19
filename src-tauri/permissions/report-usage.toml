@@ -1,0 +1,10 @@
+# Application-level permission — see report-health.toml for why this exists
+# at all (a remote origin reaches no IPC command by default).
+#
+# Grants the claude.ai usage-limits page just enough to post the scraped
+# percentages and reset text back to Rust. It cannot read or mutate anything
+# else.
+[[permission]]
+identifier = "allow-report-usage"
+description = "Allows the usage-limits page's origin to submit a scraped usage report."
+commands.allow = ["report_usage"]

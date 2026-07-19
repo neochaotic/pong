@@ -1,28 +1,37 @@
 import { describe, expect, it } from "vitest";
-import { isCronShaped, toConfig, toForm, validateForm } from "./configForm";
+import { DEFAULT_CRON, isCronShaped, toConfig, toForm, validateForm } from "./configForm";
 import type { Config } from "./types";
 
 const config: Config = {
   target_url: "https://dash.internal/login",
   cron: "0 */15 * * * *",
+  cron_enabled: false,
   selectors: {
     authenticated: "#dashboard-main",
     login_indicator: "input[type=password]",
     action_button: "#new-chat",
     text_input: "textarea#prompt",
     submit_button: null,
+    response: null,
   },
+  cleanup: { menu_button: null, delete_option: null, confirm_button: null },
   payload: "ping",
   settle_ms: 3000,
   typing_delay_ms: 60,
   element_timeout_ms: 10000,
   notifications_enabled: true,
   interaction: "full",
+  usage_url: null,
 };
 
 describe("toForm / toConfig", () => {
   it("survives a round trip", () => {
     expect(toConfig(toForm(config))).toEqual(config);
+  });
+
+  it("carries cron_enabled through the round trip in both states", () => {
+    expect(toConfig(toForm({ ...config, cron_enabled: true })).cron_enabled).toBe(true);
+    expect(toConfig(toForm({ ...config, cron_enabled: false })).cron_enabled).toBe(false);
   });
 
   it("represents a missing action button as an empty box", () => {
@@ -34,6 +43,47 @@ describe("toForm / toConfig", () => {
     const form = toForm(config);
     form.action_button = "   ";
     expect(toConfig(form).selectors.action_button).toBeNull();
+  });
+
+  it("represents a missing response selector as an empty box", () => {
+    const form = toForm({ ...config, selectors: { ...config.selectors, response: null } });
+    expect(form.response).toBe("");
+  });
+
+  it("represents missing cleanup selectors as empty boxes", () => {
+    const form = toForm(config);
+    expect(form.cleanup_menu_button).toBe("");
+    expect(form.cleanup_delete_option).toBe("");
+    expect(form.cleanup_confirm_button).toBe("");
+  });
+
+  it("represents a missing usage_url as an empty box", () => {
+    const form = toForm({ ...config, usage_url: null });
+    expect(form.usage_url).toBe("");
+  });
+
+  it("maps an empty usage_url back to null", () => {
+    const form = toForm({ ...config, usage_url: "https://claude.ai/settings/usage" });
+    form.usage_url = "   ";
+    expect(toConfig(form).usage_url).toBeNull();
+  });
+
+  it("round-trips configured cleanup selectors", () => {
+    const withCleanup: Config = {
+      ...config,
+      cleanup: {
+        menu_button: "[data-testid=\"page-header\"] button",
+        delete_option: "[data-testid=\"delete-chat-trigger\"]",
+        confirm_button: ".text-on-danger",
+      },
+    };
+    expect(toConfig(toForm(withCleanup))).toEqual(withCleanup);
+  });
+
+  it("maps an empty response selector back to null", () => {
+    const form = toForm(config);
+    form.response = "   ";
+    expect(toConfig(form).selectors.response).toBeNull();
   });
 
   it("trims surrounding whitespace from selectors and URL", () => {
@@ -77,6 +127,10 @@ describe("interaction mode", () => {
 });
 
 describe("isCronShaped", () => {
+  it("accepts the default cron", () => {
+    expect(isCronShaped(DEFAULT_CRON)).toBe(true);
+  });
+
   it("accepts 6 and 7 field expressions", () => {
     expect(isCronShaped("0 */15 * * * *")).toBe(true);
     expect(isCronShaped("0 0 9 * * Mon 2026")).toBe(true);

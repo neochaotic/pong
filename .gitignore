@@ -16,3 +16,6 @@ CLAUDE.md
 # Editor
 .vscode/
 .idea/
+
+# Playwright automation profile — holds real claude.ai session cookies.
+scripts/claude_user_data/

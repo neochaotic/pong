@@ -7,19 +7,23 @@ import type { Config } from "./types";
 const config: Config = {
   target_url: "https://dash.internal/login",
   cron: "0 */15 * * * *",
+  cron_enabled: false,
   selectors: {
     authenticated: "#dashboard-main",
     login_indicator: "input[type=password]",
     action_button: "#new-chat",
     text_input: "textarea#prompt",
     submit_button: null,
+    response: null,
   },
+  cleanup: { menu_button: null, delete_option: null, confirm_button: null },
   payload: "ping",
   settle_ms: 3000,
   typing_delay_ms: 60,
   element_timeout_ms: 10000,
   notifications_enabled: true,
   interaction: "full",
+  usage_url: null,
 };
 
 /** Render with stub callbacks; returns them so assertions can inspect calls. */
@@ -104,6 +108,35 @@ describe("SettingsView", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(onSave.mock.calls[0][0].interaction).toBe("probe_only");
+  });
+
+  it("toggles the cron schedule on", async () => {
+    const { onSave, user } = setup();
+
+    await user.click(screen.getByTestId("field-cron_enabled"));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSave.mock.calls[0][0].cron_enabled).toBe(true);
+  });
+
+  it("resets an invalid cron to the default after a rejected save", async () => {
+    const { user } = setup("Error: invalid cron expression `nope`: bad token");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByTestId("form-errors");
+
+    expect(field("cron")).toHaveValue("0 0 5 * * Mon-Fri");
+  });
+
+  it("resets a cron the local validator rejects, without a round trip", async () => {
+    const { onSave, user } = setup();
+
+    await user.clear(field("cron"));
+    await user.type(field("cron"), "*/5 * * * *");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(field("cron")).toHaveValue("0 0 5 * * Mon-Fri");
   });
 
   it("does not wipe the session on the first click", async () => {

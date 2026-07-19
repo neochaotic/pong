@@ -1,33 +1,53 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { fade, fly } from "svelte/transition";
   import HistoryView from "./lib/HistoryView.svelte";
   import SettingsView from "./lib/SettingsView.svelte";
   import StatusBadge from "./lib/StatusBadge.svelte";
+  import Toggle from "./lib/Toggle.svelte";
+  import UsageView from "./lib/UsageView.svelte";
   import {
     closeRelogin,
     forceCheck,
+    forceUsageCheck,
     getConfig,
     getHistory,
     getSnapshot,
+    getUsage,
+    getUsageHistory,
     hidePopover,
     onSnapshot,
     openRelogin,
     quitApp,
-    resizePopover,
     toggleDashboard,
     clearSession,
     saveConfig,
   } from "./lib/api";
   import { describeReport, formatCountdown, shortenUrl } from "./lib/format";
-  import type { Config, HealthReport, MonitorSnapshot } from "./lib/types";
+  import type {
+    Config,
+    HealthReport,
+    MonitorSnapshot,
+    UsageLogEntry,
+    UsageSnapshot,
+  } from "./lib/types";
 
-  const MONITOR_HEIGHT = 260;
-  const SETTINGS_HEIGHT = 470;
+  /** Re-fetch usage while the popover is on screen; skipped while hidden. */
+  const USAGE_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
+  /** The dashboard is primary; the monitor's countdown is one tab over. */
+  type Tab = "dash" | "monitor";
 
   let snapshot = $state<MonitorSnapshot | null>(null);
   let config = $state<Config | null>(null);
-  let view = $state<"monitor" | "settings" | "history">("monitor");
+  let tab = $state<Tab>("dash");
+  let view = $state<"main" | "settings" | "history">("main");
+  /** Which tab's log the open History view is showing. */
+  let historySource = $state<Tab>("dash");
   let history = $state<HealthReport[]>([]);
+  let usage = $state<UsageSnapshot | null>(null);
+  let usageHistory = $state<UsageLogEntry[]>([]);
+  let usageRefreshing = $state(false);
   let nowSec = $state(Math.floor(Date.now() / 1000));
   let busy = $state(false);
   let reconnecting = $state(false);
@@ -42,9 +62,27 @@
   const phase = $derived(snapshot?.phase ?? "READY");
   const verdict = $derived(snapshot?.last_report?.verdict ?? null);
 
+  async function refreshUsage() {
+    usageRefreshing = true;
+    try {
+      await forceUsageCheck();
+      usage = await getUsage();
+    } finally {
+      usageRefreshing = false;
+    }
+  }
+
   onMount(() => {
     getSnapshot()
       .then((s) => (snapshot = s))
+      .catch(() => {});
+    getUsage()
+      .then((u) => (usage = u))
+      .catch(() => {});
+    // Needed up front (not just when Settings opens) so the dash tab's
+    // footer can show usage_url instead of the health check's target_url.
+    getConfig()
+      .then((c) => (config = c))
       .catch(() => {});
 
     const unlisten = onSnapshot((s) => {
@@ -53,8 +91,29 @@
     });
     const timer = setInterval(() => (nowSec = Math.floor(Date.now() / 1000)), 1000);
 
+    // The popover window is shown/hidden, not remounted, so onMount alone
+    // cannot tell "just opened" from "opened an hour ago". Page visibility
+    // does: a hidden native window reports document.hidden, so this doubles
+    // as both "refresh on open" and "only tick every 5min while visible" —
+    // a background popover has no screen to update anyway.
+    let usageTimer: ReturnType<typeof setInterval> | null = null;
+    function onVisibilityChange() {
+      if (document.visibilityState !== "visible") {
+        if (usageTimer) clearInterval(usageTimer);
+        usageTimer = null;
+        return;
+      }
+      refreshUsage();
+      if (usageTimer) clearInterval(usageTimer);
+      usageTimer = setInterval(refreshUsage, USAGE_REFRESH_INTERVAL_MS);
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    if (document.visibilityState === "visible") onVisibilityChange();
+
     return () => {
       clearInterval(timer);
+      if (usageTimer) clearInterval(usageTimer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       unlisten.then((stop) => stop()).catch(() => {});
     };
   });
@@ -63,18 +122,17 @@
     // Load fresh: the file may have been edited by hand since launch.
     config = await getConfig();
     view = "settings";
-    await resizePopover(SETTINGS_HEIGHT);
   }
 
   async function openHistory() {
-    history = await getHistory();
+    historySource = tab;
+    history = tab === "monitor" ? await getHistory() : [];
+    usageHistory = tab === "dash" ? await getUsageHistory() : [];
     view = "history";
-    await resizePopover(SETTINGS_HEIGHT);
   }
 
-  async function closeSettings() {
-    view = "monitor";
-    await resizePopover(MONITOR_HEIGHT);
+  function closeSettings() {
+    view = "main";
   }
 
   async function persist(next: Config): Promise<string | null> {
@@ -109,6 +167,13 @@
     }
   }
 
+  /** Quick on/off from the monitor tab — the full cron expression still lives
+   * in Settings, this only flips whether it runs. */
+  async function toggleCronQuick(next: boolean) {
+    const current = await getConfig();
+    snapshot = await saveConfig({ ...current, cron_enabled: next });
+  }
+
   async function reconnect() {
     reconnecting = true;
     await openRelogin();
@@ -121,8 +186,20 @@
 
   function onKeydown(event: KeyboardEvent) {
     if (event.key !== "Escape") return;
-    if (view === "monitor") hidePopover();
+    if (view === "main") hidePopover();
     else closeSettings();
+  }
+
+  /** Recasts a usage-scrape log into HistoryView's shape — same list UI,
+   * different source. */
+  function usageHistoryAsReports(entries: UsageLogEntry[]): HealthReport[] {
+    return entries.map((entry) => ({
+      code: entry.ok ? 200 : 503,
+      verdict: entry.ok ? "healthy" : "degraded",
+      detail: entry.detail,
+      latency_ms: entry.latency_ms,
+      at: entry.at,
+    }));
   }
 </script>
 
@@ -133,10 +210,37 @@
          border border-line bg-ink-950 p-4 text-chalk"
 >
   <header class="flex items-center justify-between pb-3">
-    <h1 class="font-mono text-[11px] font-semibold tracking-[0.18em] text-fog">PONG</h1>
-    {#if view === "monitor"}
+    {#if view === "main"}
+      <div class="relative flex items-center rounded-lg bg-ink-900 p-0.5">
+        <!-- Sliding thumb behind the label, not a background swap on click:
+             the two tabs read as one control with a moving state, not two
+             independent buttons. -->
+        <div
+          class="absolute inset-y-0.5 w-16 rounded-md bg-ink-700 transition-transform
+                 duration-200 ease-out"
+          style="transform: translateX({tab === 'dash' ? '0' : '4rem'})"
+        ></div>
+        <button
+          class="relative z-10 w-16 py-1 text-center font-mono text-[9px] tracking-[0.12em]
+                 transition-colors {tab === 'dash' ? 'text-chalk' : 'text-fog hover:text-chalk'}"
+          data-testid="tab-dash"
+          onclick={() => (tab = "dash")}
+        >
+          DASH
+        </button>
+        <button
+          class="relative z-10 w-16 py-1 text-center font-mono text-[9px] tracking-[0.12em]
+                 transition-colors {tab === 'monitor' ? 'text-chalk' : 'text-fog hover:text-chalk'}"
+          data-testid="tab-monitor"
+          onclick={() => (tab = "monitor")}
+        >
+          PONG
+        </button>
+      </div>
       <div class="flex items-center gap-2">
-        <StatusBadge {phase} {verdict} />
+        {#if tab === "monitor"}
+          <StatusBadge {phase} {verdict} />
+        {/if}
         <!-- 28px hit area around a 16px glyph: an emoji at 10px was both hard
              to see and hard to click. -->
         <button
@@ -190,16 +294,24 @@
         </button>
       </div>
     {:else}
+      <h1 class="font-mono text-[11px] font-semibold tracking-[0.18em] text-fog">PONG</h1>
       <span class="font-mono text-[10px] tracking-[0.14em] text-fog">
-        {view === "history" ? "HISTORY" : "SETTINGS"}
+        {view === "history" ? (historySource === "dash" ? "USAGE HISTORY" : "HISTORY") : "SETTINGS"}
       </span>
     {/if}
   </header>
 
   {#if view === "history"}
-    <HistoryView {history} onClose={closeSettings} />
+    <div class="flex min-h-0 flex-1 flex-col" in:fly={{ x: 24, duration: 180 }}>
+      <HistoryView
+        history={historySource === "dash" ? usageHistoryAsReports(usageHistory) : history}
+        onClose={closeSettings}
+      />
+    </div>
   {:else if view === "settings" && config}
-    <SettingsView {config} onSave={persist} onClose={closeSettings} onClearSession={wipeSession} />
+    <div class="flex min-h-0 flex-1 flex-col" in:fly={{ x: 24, duration: 180 }}>
+      <SettingsView {config} onSave={persist} onClose={closeSettings} onClearSession={wipeSession} />
+    </div>
   {:else if snapshot?.needs_relogin}
     <!-- Recovery path takes over the body: nothing else matters until it clears. -->
     <section class="flex flex-col gap-2">
@@ -229,46 +341,96 @@
       </div>
     </footer>
   {:else}
-    <section class="flex flex-col gap-1">
-      <span class="font-mono text-[10px] tracking-[0.16em] text-fog">NEXT CHECK</span>
-      <span class="tabular font-mono text-[38px] leading-none font-light text-chalk">
-        {formatCountdown(remaining)}
-      </span>
-    </section>
+    <!-- Both tabs occupy the exact same box (absolute + relative) so the
+         crossfade overlays them instead of stacking two panels in flow,
+         which read as a jump rather than a smooth cut. -->
+    <div class="relative min-h-0 flex-1">
+      {#if tab === "dash"}
+        <div
+          class="absolute inset-0 flex flex-col justify-between"
+          transition:fade={{ duration: 180 }}
+        >
+          <UsageView
+            {usage}
+            refreshing={usageRefreshing}
+            dashboardVisible={snapshot?.dashboard_visible ?? false}
+            onRefresh={refreshUsage}
+            onToggleLogin={toggleLoginWindow}
+          />
 
-    <div class="flex gap-2">
-      <button
-        class="flex-1 rounded-lg border border-line bg-ink-800 px-3 py-2 text-[12px]
-               font-medium text-chalk transition hover:bg-ink-700 disabled:opacity-50"
-        onclick={runCheck}
-        disabled={busy || phase === "PINGING"}
-      >
-        {busy || phase === "PINGING" ? "Checking…" : "Force Check"}
-      </button>
-      <!-- Always available: signing in is not only a recovery action, it is how
-           the very first session is established. -->
-      <button
-        class="rounded-lg border border-line bg-ink-800 px-3 py-2 text-[12px]
-               text-fog transition hover:bg-ink-700 hover:text-chalk"
-        onclick={toggleLoginWindow}
-        title="Show or hide the dashboard window to sign in"
-      >
-        {snapshot?.dashboard_visible ? "Hide login" : "Show login"}
-      </button>
+          <footer class="flex flex-col gap-2 border-t border-line pt-3">
+            <div class="flex items-center justify-between">
+              <span class="truncate font-mono text-[10px] text-fog">
+                {config?.usage_url ? shortenUrl(config.usage_url) : "—"}
+              </span>
+              <button
+                class="font-mono text-[10px] text-fog transition hover:text-danger"
+                onclick={quitApp}
+              >
+                QUIT
+              </button>
+            </div>
+          </footer>
+        </div>
+      {:else}
+        <div
+          class="absolute inset-0 flex flex-col justify-between"
+          transition:fade={{ duration: 180 }}
+        >
+          <section class="flex flex-col gap-1">
+            <div class="flex items-center justify-between">
+              <span class="font-mono text-[10px] tracking-[0.16em] text-fog">
+                {snapshot?.cron_enabled ? "NEXT CHECK" : "SCHEDULE"}
+              </span>
+              <Toggle
+                testid="quick-cron-toggle"
+                checked={snapshot?.cron_enabled ?? false}
+                onChange={toggleCronQuick}
+                label="Run on schedule"
+                showLabel={false}
+              />
+            </div>
+            {#if snapshot?.cron_enabled}
+              <span class="tabular font-mono text-[38px] leading-none font-light text-chalk">
+                {formatCountdown(remaining)}
+              </span>
+            {:else}
+              <span class="font-mono text-[13px] leading-snug text-fog">
+                Disabled — flip the switch above, or use Force Check below.
+              </span>
+            {/if}
+          </section>
+
+          <button
+            class="rounded-lg border border-line bg-ink-800 px-3 py-2 text-[12px]
+                   font-medium text-chalk transition hover:bg-ink-700 disabled:opacity-50"
+            onclick={runCheck}
+            disabled={busy || phase === "PINGING"}
+          >
+            {busy || phase === "PINGING" ? "Checking…" : "Force Check"}
+          </button>
+
+          <footer class="flex flex-col gap-2 border-t border-line pt-3">
+            <p
+              class="truncate font-mono text-[10px] text-fog"
+              title={snapshot?.last_report?.detail ?? ""}
+            >
+              {describeReport(snapshot?.last_report ?? null)}
+            </p>
+            <div class="flex items-center justify-between">
+              <span class="truncate font-mono text-[10px] text-fog">
+                {snapshot ? shortenUrl(snapshot.target_url) : "—"}
+              </span>
+              <button
+                class="font-mono text-[10px] text-fog transition hover:text-danger"
+                onclick={quitApp}
+              >
+                QUIT
+              </button>
+            </div>
+          </footer>
+        </div>
+      {/if}
     </div>
-
-    <footer class="flex flex-col gap-2 border-t border-line pt-3">
-      <p class="truncate font-mono text-[10px] text-fog" title={snapshot?.last_report?.detail ?? ""}>
-        {describeReport(snapshot?.last_report ?? null)}
-      </p>
-      <div class="flex items-center justify-between">
-        <span class="truncate font-mono text-[10px] text-fog">
-          {snapshot ? shortenUrl(snapshot.target_url) : "—"}
-        </span>
-        <button class="font-mono text-[10px] text-fog transition hover:text-danger" onclick={quitApp}>
-          QUIT
-        </button>
-      </div>
-    </footer>
   {/if}
 </main>

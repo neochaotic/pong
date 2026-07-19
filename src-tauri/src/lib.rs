@@ -12,6 +12,7 @@ pub mod monitor;
 pub mod scheduler;
 pub mod state;
 pub mod tray;
+pub mod usage;
 
 use crate::config::Config;
 use crate::health::ProbePayload;
@@ -50,6 +51,22 @@ impl CronHandle {
             })
         })
         .await
+    }
+
+    /// Stop the running job, if any, without installing a replacement.
+    ///
+    /// Used when the user turns the cron toggle off: the schedule config
+    /// stays put on disk (so turning it back on restores the same cadence),
+    /// but nothing fires until they do.
+    pub async fn uninstall(&self) -> Result<(), String> {
+        let mut guard = self.inner.lock().await;
+        if let Some((scheduler, previous)) = guard.take() {
+            scheduler
+                .remove(&previous)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 
     /// The scheduling half of `install`, independent of what the job does.
@@ -236,11 +253,16 @@ async fn save_config(
         }
     }
 
-    // A new cron string only takes effect once the job is reinstalled.
-    if previous.cron != config.cron {
-        cron_handle
-            .install(app.clone(), state.clone(), &config.cron)
-            .await?;
+    // A new cron string, or a toggle flip, only takes effect once the job is
+    // reinstalled (or torn down).
+    if previous.cron != config.cron || previous.cron_enabled != config.cron_enabled {
+        if config.cron_enabled {
+            cron_handle
+                .install(app.clone(), state.clone(), &config.cron)
+                .await?;
+        } else {
+            cron_handle.uninstall().await?;
+        }
     }
 
     monitor::emit_snapshot(&app, &state);
@@ -262,6 +284,36 @@ async fn force_check(
 #[tauri::command]
 fn report_health(state: tauri::State<'_, Arc<AppState>>, payload: ProbePayload) {
     state.resolve_report(payload);
+}
+
+/// The most recently scraped claude.ai usage panel, if any.
+#[tauri::command]
+fn get_usage(state: tauri::State<'_, Arc<AppState>>) -> Option<crate::usage::UsageSnapshot> {
+    state.usage_snapshot()
+}
+
+/// Past usage-scrape attempts, newest first, for the dash's own history view.
+#[tauri::command]
+fn get_usage_history(state: tauri::State<'_, Arc<AppState>>) -> Vec<crate::usage::UsageLogEntry> {
+    state.usage_history()
+}
+
+/// Scrape the usage panel right now — used on popover open, on a timer while
+/// it stays visible, and by the dash's manual refresh button.
+#[tauri::command]
+async fn force_usage_check(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    let state = state.inner().clone();
+    monitor::run_usage_check(app, state).await;
+    Ok(())
+}
+
+/// Called by the injected agent's usage scraper.
+#[tauri::command]
+fn report_usage(state: tauri::State<'_, Arc<AppState>>, payload: crate::usage::UsageProbePayload) {
+    state.resolve_usage_report(payload);
 }
 
 /// Sign out: erase cookies and storage, then reload the login page.
@@ -340,6 +392,10 @@ pub fn run() {
             save_config,
             force_check,
             report_health,
+            get_usage,
+            get_usage_history,
+            force_usage_check,
+            report_usage,
             open_relogin,
             close_relogin,
             hide_popover,
@@ -351,6 +407,9 @@ pub fn run() {
             // Tray-only app: no dock icon, no app switcher entry.
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            #[cfg(target_os = "macos")]
+            disable_app_nap();
 
             let handle = app.handle().clone();
 
@@ -369,7 +428,9 @@ pub fn run() {
             build_hidden_webview(&handle, &config)?;
             tray::build(&handle)?;
 
-            start_scheduler(handle.clone(), state.clone(), config.cron.clone());
+            if config.cron_enabled {
+                start_scheduler(handle.clone(), state.clone(), config.cron.clone());
+            }
             start_ticker(handle, state);
 
             Ok(())
@@ -392,6 +453,32 @@ pub fn run() {
 /// the menu bar shows the app's name, and — more importantly — without an Edit
 /// submenu the standard Cmd+C/Cmd+V shortcuts do nothing. Pasting a password
 /// from a password manager is exactly what the sign-in window is for.
+/// Opts the whole process out of App Nap.
+///
+/// A tray-only app has no visible window, no dock icon and is rarely
+/// frontmost — exactly the profile macOS throttles hardest for CPU and
+/// timers. That throttling was found to reach into the hidden webview's own
+/// JS execution: a `full` check's typing/settle/response waits could run
+/// 5-10x slower while occluded, occasionally missing the check's time budget
+/// outright. `UserInitiatedAllowingIdleSystemSleep` disables App Nap for this
+/// process without holding the whole Mac awake, which a background monitor
+/// has no business doing.
+///
+/// The returned activity token must stay alive for the app's entire
+/// lifetime — there is no natural point to end it, so it is deliberately
+/// leaked rather than dropped.
+#[cfg(target_os = "macos")]
+fn disable_app_nap() {
+    use objc2_foundation::{ns_string, NSActivityOptions, NSProcessInfo};
+
+    let info = NSProcessInfo::processInfo();
+    let activity = info.beginActivityWithOptions_reason(
+        NSActivityOptions::UserInitiatedAllowingIdleSystemSleep,
+        ns_string!("Pong runs periodic synthetic checks against a hidden webview"),
+    );
+    std::mem::forget(activity);
+}
+
 #[cfg(target_os = "macos")]
 fn build_app_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     use tauri::menu::{AboutMetadata, Menu, PredefinedMenuItem, Submenu};
@@ -441,7 +528,10 @@ fn build_popover(app: &tauri::AppHandle) -> tauri::Result<()> {
     let popover =
         WebviewWindowBuilder::new(app, POPOVER_LABEL, WebviewUrl::App("index.html".into()))
             .title("Pong")
-            .inner_size(320.0, 260.0)
+            // One fixed size for every view. Settings/History scroll their own
+            // content internally rather than resizing the window on each
+            // navigation, which read as jarring — see resizePopover's removal.
+            .inner_size(320.0, 360.0)
             .resizable(false)
             .decorations(false)
             .transparent(true)
@@ -472,13 +562,16 @@ fn build_hidden_webview(app: &tauri::AppHandle, config: &Config) -> tauri::Resul
     let data_dir = app.path().app_data_dir()?.join("webview-session");
     std::fs::create_dir_all(&data_dir)?;
 
-    WebviewWindowBuilder::new(app, MONITOR_LABEL, WebviewUrl::External(url))
+    let webview = WebviewWindowBuilder::new(app, MONITOR_LABEL, WebviewUrl::External(url))
         // This window is shown to the user for manual sign-in, so it carries the
         // product name. (It previously had no title so Rust could read the
         // agent's breadcrumb from `document.title` — a diagnostic that only
         // mattered while the IPC bridge was broken.)
         .title("Pong — Dashboard")
         .inner_size(1100.0, 820.0)
+        // Hidden by design — this is the real, shipped behavior. The check
+        // pipeline must work occluded; see the MutationObserver-based waits
+        // in agent.js, added specifically so it does.
         .visible(false)
         .skip_taskbar(true)
         .data_directory(data_dir)
@@ -491,6 +584,9 @@ fn build_hidden_webview(app: &tauri::AppHandle, config: &Config) -> tauri::Resul
             let _ = webview;
         })
         .build()?;
+
+    #[cfg(debug_assertions)]
+    webview.open_devtools();
 
     Ok(())
 }

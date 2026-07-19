@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-import type { Config, HealthReport, MonitorSnapshot } from "./types";
+import type { Config, HealthReport, MonitorSnapshot, UsageLogEntry, UsageSnapshot } from "./types";
 
 /** Must match `monitor::UPDATE_EVENT`. */
 export const UPDATE_EVENT = "monitor://update";
@@ -26,6 +26,12 @@ export const clearSession = () => invoke<MonitorSnapshot>("clear_session");
 export const closeRelogin = () => invoke<void>("close_relogin");
 export const hidePopover = () => invoke<void>("hide_popover");
 export const quitApp = () => invoke<void>("quit_app");
+
+/** The most recently scraped claude.ai usage panel, if any. */
+export const getUsage = () => invoke<UsageSnapshot | null>("get_usage");
+/** Past usage-scrape attempts, newest first. */
+export const getUsageHistory = () => invoke<UsageLogEntry[]>("get_usage_history");
+export const forceUsageCheck = () => invoke<void>("force_usage_check");
 
 /** Subscribe to backend state pushes; returns the unlisten handle. */
 export const onSnapshot = (
