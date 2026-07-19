@@ -81,9 +81,12 @@ open the app for the first time, not after:
 - **macOS**: a plain double-click will silently fail — Gatekeeper blocks the launch *before the
   process starts*, and because Pong is a menu-bar-only app (no Dock icon, no window), nothing
   visibly happens. No crash dialog, no bounce, nothing. It looks exactly like the install did
-  nothing, even though it worked. Fix it with one of:
+  nothing, even though it worked. Sometimes, instead of that silent failure, you get an explicit
+  **"Pong.app is damaged and can't be opened"** dialog telling you to move it to the Trash — same
+  root cause (unsigned + quarantined), just a scarier, more misleading message. **The app is not
+  actually damaged; do not trash it.** Fix either case with one of:
   - Right-click the app → *Open* → *Open* (do this once; normal double-clicks work afterward), or
-  - `xattr -cr /Applications/Pong.app`
+  - Terminal: `xattr -cr /Applications/Pong.app && open /Applications/Pong.app`
 - **Windows**: SmartScreen shows a warning — *More info* → *Run anyway*.
 
 If you've done this and still don't see the tray icon, that's a real bug — please
