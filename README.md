@@ -251,8 +251,8 @@ dashboard actually takes to finish responding.
 
 ## Signing in
 
-The default target is `https://github.com/login`, so a fresh install has something
-real to authenticate against.
+The default target is `https://claude.ai/new`, so a fresh install has something real to
+authenticate against out of the box.
 
 1. Click the tray icon → **Show login** (or the tray menu → *Show/Hide Login Window*).
 2. The dashboard window appears. Sign in by hand — Pong never handles credentials.

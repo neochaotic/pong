@@ -77,7 +77,7 @@ fn defaults_to_probe_only_so_a_fresh_install_never_types() {
     // post a comment or submit a form once per cron tick, forever.
     let cfg = Config::from_json("{}").unwrap();
     assert_eq!(cfg.interaction, Interaction::ProbeOnly);
-    assert_eq!(cfg.target_url, "https://github.com/login");
+    assert_eq!(cfg.target_url, "https://claude.ai/new");
 }
 
 #[test]
@@ -103,7 +103,7 @@ fn applies_defaults_for_omitted_fields() {
     // Every field has a sane default so a bare `{}` still boots the app.
     let cfg = Config::from_json("{}").expect("empty object should fall back to defaults");
 
-    assert_eq!(cfg.target_url, "https://github.com/login");
+    assert_eq!(cfg.target_url, "https://claude.ai/new");
     assert_eq!(cfg.payload, "ping");
     assert_eq!(cfg.settle_ms, 3000);
     assert!(!cfg.cron.is_empty());

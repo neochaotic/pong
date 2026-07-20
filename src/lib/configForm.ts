@@ -39,15 +39,15 @@ export const DEFAULT_CRON = "0 0 5 * * Mon-Fri";
 
 /**
  * Mirrors `Config::default()` in `config.rs` field-for-field — a real login
- * page (GitHub's) and `probe_only`, so "Restore defaults" hands back
+ * page (claude.ai's) and `probe_only`, so "Restore defaults" hands back
  * something a fresh install would actually ship with, not an empty form.
  */
 export const DEFAULT_CONFIG: Config = {
-  target_url: "https://github.com/login",
+  target_url: "https://claude.ai/new",
   cron: DEFAULT_CRON,
   cron_enabled: false,
   selectors: {
-    authenticated: 'meta[name="user-login"]',
+    authenticated: '[data-testid="user-menu-button"]',
     login_indicator: "input[type=password]",
     action_button: null,
     text_input: 'textarea, div[contenteditable="true"]',
