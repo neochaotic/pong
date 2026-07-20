@@ -239,9 +239,9 @@ describe("validateForm", () => {
 });
 
 describe("DEFAULT_CONFIG / defaultForm", () => {
-  it("mirrors Config::default() — a real login page, probe-only, cron off", () => {
+  it("mirrors Config::default() — a real login page, full interaction, cron off", () => {
     expect(DEFAULT_CONFIG.target_url).toBe("https://claude.ai/new");
-    expect(DEFAULT_CONFIG.interaction).toBe("probe_only");
+    expect(DEFAULT_CONFIG.interaction).toBe("full");
     expect(DEFAULT_CONFIG.cron_enabled).toBe(false);
     expect(DEFAULT_CONFIG.cron).toBe(DEFAULT_CRON);
   });

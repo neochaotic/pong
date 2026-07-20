@@ -680,9 +680,11 @@ mod tests {
 
     #[test]
     fn budget_covers_typing_plus_settle_plus_element_wait_plus_overhead() {
-        let cfg =
-            Config::from_json(r##"{"payload":"ping","typing_delay_ms":100,"settle_ms":3000}"##)
-                .unwrap();
+        let cfg = Config::from_json(
+            r##"{"payload":"ping","typing_delay_ms":100,"settle_ms":3000,
+                 "selectors":{"response":null},"cleanup":{"menu_button":null,"delete_option":null,"confirm_button":null}}"##,
+        )
+        .unwrap();
         // 4 chars * 100ms + 3000ms + default 10s element wait + 2s overhead
         assert_eq!(
             check_budget(&cfg),
@@ -692,7 +694,10 @@ mod tests {
 
     #[test]
     fn budget_handles_an_empty_payload() {
-        let cfg = Config::from_json(r##"{"payload":"","settle_ms":0}"##).unwrap();
+        let cfg = Config::from_json(
+            r##"{"payload":"","settle_ms":0,"selectors":{"response":null},"cleanup":{"menu_button":null,"delete_option":null,"confirm_button":null}}"##,
+        )
+        .unwrap();
         assert_eq!(
             check_budget(&cfg),
             Duration::from_millis(10_000) + FIXED_OVERHEAD
@@ -701,8 +706,11 @@ mod tests {
 
     #[test]
     fn budget_counts_unicode_characters_not_bytes() {
-        let cfg = Config::from_json(r##"{"payload":"héllo","typing_delay_ms":10,"settle_ms":0}"##)
-            .unwrap();
+        let cfg = Config::from_json(
+            r##"{"payload":"héllo","typing_delay_ms":10,"settle_ms":0,
+                 "selectors":{"response":null},"cleanup":{"menu_button":null,"delete_option":null,"confirm_button":null}}"##,
+        )
+        .unwrap();
         assert_eq!(
             check_budget(&cfg),
             Duration::from_millis(50) + Duration::from_millis(10_000) + FIXED_OVERHEAD
@@ -713,7 +721,8 @@ mod tests {
     fn budget_doubles_the_element_wait_when_a_response_selector_is_configured() {
         let cfg = Config::from_json(
             r##"{"payload":"","settle_ms":0,"element_timeout_ms":5000,
-                 "selectors":{"response":".reply"}}"##,
+                 "selectors":{"response":".reply"},
+                 "cleanup":{"menu_button":null,"delete_option":null,"confirm_button":null}}"##,
         )
         .unwrap();
         // One wait for the text input/submit button, a second independent one
@@ -728,6 +737,7 @@ mod tests {
     fn budget_adds_one_wait_pass_per_configured_cleanup_step() {
         let cfg = Config::from_json(
             r##"{"payload":"","settle_ms":0,"element_timeout_ms":5000,
+                 "selectors":{"response":null},
                  "cleanup":{"menu_button":"a","delete_option":"b","confirm_button":"c"}}"##,
         )
         .unwrap();
