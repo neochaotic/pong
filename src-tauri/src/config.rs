@@ -289,21 +289,33 @@ impl Config {
     /// v0.0.1 defaulted `target_url`/`selectors.authenticated` to GitHub's
     /// login page — meaningless for an app marketed specifically as a
     /// Claude.ai companion (fixed in v0.0.2, see config.rs history). Anyone
-    /// who installed before that fix has both stale values baked into their
-    /// config file, and a version bump alone does not touch existing user
-    /// config — silently upgrade the two fields, but only when *both* still
-    /// hold the exact old values, so a real customization is never touched.
+    /// who installed before that fix has one or both stale values baked into
+    /// their config file, and a version bump alone does not touch existing
+    /// user config — silently upgrade each field independently when it still
+    /// holds its exact old value.
+    ///
+    /// Each field is checked on its own, not "both must match": someone who
+    /// already hand-fixed `target_url` (pointed it at claude.ai themselves,
+    /// following an earlier, incomplete workaround) but never knew about the
+    /// selector would otherwise stay stuck on the broken `authenticated`
+    /// value forever, since it'd never again match the "both still equal
+    /// their original defaults" condition a combined check would require.
+    /// Both old values are specific enough to GitHub's DOM that neither is a
+    /// plausible deliberate customization for any other target.
     fn migrate_stale_github_defaults(&mut self) -> bool {
         const OLD_TARGET_URL: &str = "https://github.com/login";
         const OLD_AUTHENTICATED: &str = "meta[name=\"user-login\"]";
 
-        if self.target_url == OLD_TARGET_URL && self.selectors.authenticated == OLD_AUTHENTICATED {
+        let mut migrated = false;
+        if self.target_url == OLD_TARGET_URL {
             self.target_url = default_target_url();
-            self.selectors.authenticated = default_authenticated();
-            true
-        } else {
-            false
+            migrated = true;
         }
+        if self.selectors.authenticated == OLD_AUTHENTICATED {
+            self.selectors.authenticated = default_authenticated();
+            migrated = true;
+        }
+        migrated
     }
 
     /// Persist the configuration as pretty-printed JSON, creating parent dirs.
