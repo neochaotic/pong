@@ -274,12 +274,36 @@ impl Config {
     /// Load a configuration from disk, seeding the file with defaults when absent.
     pub fn load_or_create(path: &Path) -> Result<Self, ConfigError> {
         if path.exists() {
-            return Self::from_json(&std::fs::read_to_string(path)?);
+            let mut cfg = Self::from_json(&std::fs::read_to_string(path)?)?;
+            if cfg.migrate_stale_github_defaults() {
+                cfg.save(path)?;
+            }
+            return Ok(cfg);
         }
 
         let cfg = Config::default();
         cfg.save(path)?;
         Ok(cfg)
+    }
+
+    /// v0.0.1 defaulted `target_url`/`selectors.authenticated` to GitHub's
+    /// login page — meaningless for an app marketed specifically as a
+    /// Claude.ai companion (fixed in v0.0.2, see config.rs history). Anyone
+    /// who installed before that fix has both stale values baked into their
+    /// config file, and a version bump alone does not touch existing user
+    /// config — silently upgrade the two fields, but only when *both* still
+    /// hold the exact old values, so a real customization is never touched.
+    fn migrate_stale_github_defaults(&mut self) -> bool {
+        const OLD_TARGET_URL: &str = "https://github.com/login";
+        const OLD_AUTHENTICATED: &str = "meta[name=\"user-login\"]";
+
+        if self.target_url == OLD_TARGET_URL && self.selectors.authenticated == OLD_AUTHENTICATED {
+            self.target_url = default_target_url();
+            self.selectors.authenticated = default_authenticated();
+            true
+        } else {
+            false
+        }
     }
 
     /// Persist the configuration as pretty-printed JSON, creating parent dirs.
