@@ -57,10 +57,19 @@ fn default_cron() -> String {
     "0 0 5 * * Mon-Fri".to_string()
 }
 fn default_authenticated() -> String {
-    // Present only once GitHub has a session.
-    "meta[name=\"user-login\"]".to_string()
+    // claude.ai's account menu button — verified against a real logged-in
+    // session via `scripts/claude_automation.js inspect`. Present only once
+    // claude.ai has a session; absent on the login screen.
+    "[data-testid=\"user-menu-button\"]".to_string()
 }
 fn default_login_indicator() -> String {
+    // NOT verified against claude.ai's actual login screen — `scripts/
+    // claude_automation.js inspect-logged-out` hits a Cloudflare bot
+    // challenge before reaching it (see script comments), so this is still
+    // the generic "some login form has a password field" placeholder. Sign-in
+    // is email/magic-link based on claude.ai, so this likely never matches
+    // there either; `authenticated` not matching is what actually drives the
+    // unauthorized-detection path in practice. Tracked as a follow-up.
     "input[type=password]".to_string()
 }
 fn default_text_input() -> String {

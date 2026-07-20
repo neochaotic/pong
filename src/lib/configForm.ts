@@ -47,7 +47,7 @@ export const DEFAULT_CONFIG: Config = {
   cron: DEFAULT_CRON,
   cron_enabled: false,
   selectors: {
-    authenticated: 'meta[name="user-login"]',
+    authenticated: '[data-testid="user-menu-button"]',
     login_indicator: "input[type=password]",
     action_button: null,
     text_input: 'textarea, div[contenteditable="true"]',
