@@ -94,6 +94,9 @@ fn default_true() -> bool {
 fn default_interaction() -> Interaction {
     Interaction::ProbeOnly
 }
+fn default_usage_url() -> Option<String> {
+    Some("https://claude.ai/settings/usage".to_string())
+}
 
 /// How far a check should go once the session is confirmed alive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -236,10 +239,13 @@ pub struct Config {
     pub interaction: Interaction,
     /// Claude.ai's usage-limits page, e.g. `https://claude.ai/settings/usage`.
     ///
-    /// Unset by default — this opts the popover's usage dashboard in. Separate
-    /// from the generic check pipeline: `agent.js`'s scraper for this page is
-    /// hardcoded to claude.ai's current DOM shape, not driven by selectors.
-    #[serde(default)]
+    /// Defaults to claude.ai's own usage page — the popover's usage dashboard
+    /// (DASH) is the app's primary view, so leaving it dark out of the box
+    /// defeats the point for the Claude.ai audience Pong is built for. Set to
+    /// `null` explicitly to hide it. Separate from the generic check
+    /// pipeline: `agent.js`'s scraper for this page is hardcoded to claude.ai's
+    /// current DOM shape, not driven by selectors.
+    #[serde(default = "default_usage_url")]
     pub usage_url: Option<String>,
 }
 
@@ -258,7 +264,7 @@ impl Default for Config {
             notifications_enabled: true,
             autostart_enabled: true,
             interaction: default_interaction(),
-            usage_url: None,
+            usage_url: default_usage_url(),
         }
     }
 }
@@ -275,7 +281,26 @@ impl Config {
     pub fn load_or_create(path: &Path) -> Result<Self, ConfigError> {
         if path.exists() {
             let mut cfg = Self::from_json(&std::fs::read_to_string(path)?)?;
-            if cfg.migrate_stale_github_defaults() {
+            let mut needs_save = cfg.migrate_stale_github_defaults();
+
+            // One-time enablement, not a standing rule — `usage_url: null` is
+            // also the legitimate "I turned the dashboard off" state, so this
+            // must never re-fire on a later load and stomp that choice. A
+            // sibling marker file (not a Config field) tracks "already ran",
+            // deliberately kept out of the Config struct so it can never be
+            // dropped by a Settings save reconstructing Config from form
+            // fields alone (toConfig() in configForm.ts has no way to pass
+            // through a field it doesn't know about).
+            let migration_marker = path.with_file_name(".usage_dashboard_migration_done");
+            if !migration_marker.exists() {
+                if cfg.usage_url.is_none() {
+                    cfg.usage_url = default_usage_url();
+                    needs_save = true;
+                }
+                let _ = std::fs::write(&migration_marker, "");
+            }
+
+            if needs_save {
                 cfg.save(path)?;
             }
             return Ok(cfg);
