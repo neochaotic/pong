@@ -1,6 +1,6 @@
 [package]
 name = "pongllm"
-version = "0.0.2"
+version = "0.0.3"
 description = "Synthetic web health monitor that lives in the system tray"
 authors = ["neochaotic"]
 edition = "2021"
