@@ -242,8 +242,20 @@ fn rejects_an_empty_cleanup_selector() {
 }
 
 #[test]
-fn usage_url_is_optional_and_defaults_to_none() {
+fn usage_url_defaults_to_claude_ai_usage_page() {
+    // DASH (the usage dashboard) is the popover's primary view — leaving it
+    // dark by default defeated the point for the Claude.ai audience Pong is
+    // built for. Explicit `null` still opts out.
     let cfg = Config::from_json("{}").unwrap();
+    assert_eq!(
+        cfg.usage_url.as_deref(),
+        Some("https://claude.ai/settings/usage")
+    );
+}
+
+#[test]
+fn usage_url_can_be_explicitly_disabled() {
+    let cfg = Config::from_json(r##"{"usage_url": null}"##).unwrap();
     assert_eq!(cfg.usage_url, None);
 }
 
@@ -403,4 +415,41 @@ fn load_or_create_migrates_authenticated_even_when_target_url_was_already_hand_f
         cfg.selectors.authenticated,
         "[data-testid=\"user-menu-button\"]"
     );
+}
+
+#[test]
+fn load_or_create_enables_the_usage_dashboard_once_for_an_existing_install() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    std::fs::write(&path, r##"{"usage_url": null}"##).unwrap();
+
+    let cfg = Config::load_or_create(&path).expect("existing config should still load");
+
+    assert_eq!(
+        cfg.usage_url.as_deref(),
+        Some("https://claude.ai/settings/usage"),
+        "an existing install with the dashboard never configured should get it enabled once"
+    );
+}
+
+#[test]
+fn load_or_create_never_re_enables_a_deliberately_disabled_usage_dashboard() {
+    // The one-time migration must not become a standing rule that fights a
+    // user who explicitly turns the dashboard back off later.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    std::fs::write(&path, r##"{"usage_url": null}"##).unwrap();
+
+    // First load: the one-time migration enables it and writes the marker.
+    let first = Config::load_or_create(&path).unwrap();
+    assert!(first.usage_url.is_some());
+
+    // The user turns it back off by hand and saves.
+    let mut turned_off = first;
+    turned_off.usage_url = None;
+    turned_off.save(&path).unwrap();
+
+    // A later load must respect that choice, not re-enable it.
+    let second = Config::load_or_create(&path).unwrap();
+    assert_eq!(second.usage_url, None);
 }

@@ -62,7 +62,7 @@ export const DEFAULT_CONFIG: Config = {
   notifications_enabled: true,
   autostart_enabled: true,
   interaction: "probe_only",
-  usage_url: null,
+  usage_url: "https://claude.ai/settings/usage",
 };
 
 export function toForm(config: Config): FormState {
