@@ -342,7 +342,7 @@ impl Config {
             // this must never re-fire and undo that later. Bundled as a
             // single migration because they're only safe together — flipping
             // `interaction` to `full` while leaving `submit_button`/
-            // `response`/`cleanup` at their old `None` defaults would run
+            // `response`/`cleanup`/`payload` at their old defaults would run
             // real synthetic transactions with no reply capture and, worse,
             // no post-check cleanup, leaving a stray conversation behind on
             // every single check.
@@ -362,6 +362,16 @@ impl Config {
                 }
                 if !cfg.cleanup.is_configured() {
                     cfg.cleanup = Cleanup::default();
+                    needs_save = true;
+                }
+                // The old generic "ping" payload has nothing for Claude to
+                // respond to meaningfully, so a real synthetic transaction
+                // gets a rambling reply instead of the clean "OK" the new
+                // default asks for. Same story as the selectors above: this
+                // only matters once `interaction` is actually `full`, so it
+                // belongs in this migration, not a separate one.
+                if cfg.payload == "ping" {
+                    cfg.payload = default_payload();
                     needs_save = true;
                 }
                 let _ = std::fs::write(&full_marker, "");

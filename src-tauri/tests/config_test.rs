@@ -499,7 +499,8 @@ fn load_or_create_enables_full_interaction_once_for_an_existing_install() {
     let path = dir.path().join("config.json");
     std::fs::write(
         &path,
-        r##"{"interaction": "probe_only", "selectors": {"submit_button": null, "response": null},
+        r##"{"interaction": "probe_only", "payload": "ping",
+             "selectors": {"submit_button": null, "response": null},
              "cleanup": {"menu_button": null, "delete_option": null, "confirm_button": null}}"##,
     )
     .unwrap();
@@ -510,6 +511,22 @@ fn load_or_create_enables_full_interaction_once_for_an_existing_install() {
     assert!(cfg.selectors.submit_button.is_some());
     assert!(cfg.selectors.response.is_some());
     assert!(cfg.cleanup.is_configured());
+    assert_eq!(cfg.payload, "Reply with exactly one word: OK");
+}
+
+#[test]
+fn load_or_create_leaves_a_customized_payload_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    std::fs::write(
+        &path,
+        r##"{"interaction": "probe_only", "payload": "say hello in French"}"##,
+    )
+    .unwrap();
+
+    let cfg = Config::load_or_create(&path).unwrap();
+
+    assert_eq!(cfg.payload, "say hello in French");
 }
 
 #[test]
