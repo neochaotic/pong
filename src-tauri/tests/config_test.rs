@@ -323,3 +323,57 @@ fn load_or_create_reads_an_existing_file() {
     let cfg = Config::load_or_create(&path).unwrap();
     assert_eq!(cfg.target_url, "https://dash.internal/login");
 }
+
+#[test]
+fn load_or_create_migrates_a_stale_v0_0_1_github_default_to_claude_ai() {
+    // v0.0.1 shipped target_url/authenticated defaulted to GitHub's login
+    // page. A version bump alone never touches an existing config.json, so
+    // anyone who installed before the fix is stuck on it forever without
+    // this migration.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    std::fs::write(
+        &path,
+        r##"{
+          "target_url": "https://github.com/login",
+          "selectors": { "authenticated": "meta[name=\"user-login\"]" }
+        }"##,
+    )
+    .unwrap();
+
+    let cfg = Config::load_or_create(&path).expect("stale config should still load");
+
+    assert_eq!(cfg.target_url, "https://claude.ai/new");
+    assert_eq!(
+        cfg.selectors.authenticated,
+        "[data-testid=\"user-menu-button\"]"
+    );
+
+    // The fix must be persisted, not just applied in memory — reloading from
+    // a fresh Config::load_or_create call reads the file straight off disk.
+    let raw = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        raw.contains("claude.ai/new"),
+        "migration was not saved: {raw}"
+    );
+}
+
+#[test]
+fn load_or_create_leaves_a_customized_target_url_alone() {
+    // The migration must not clobber a real customization — only fire when
+    // BOTH fields still hold the exact old defaults.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    std::fs::write(
+        &path,
+        r##"{
+          "target_url": "https://dash.internal/login",
+          "selectors": { "authenticated": "meta[name=\"user-login\"]" }
+        }"##,
+    )
+    .unwrap();
+
+    let cfg = Config::load_or_create(&path).unwrap();
+
+    assert_eq!(cfg.target_url, "https://dash.internal/login");
+}
