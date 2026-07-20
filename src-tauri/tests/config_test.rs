@@ -359,9 +359,9 @@ fn load_or_create_migrates_a_stale_v0_0_1_github_default_to_claude_ai() {
 }
 
 #[test]
-fn load_or_create_leaves_a_customized_target_url_alone() {
-    // The migration must not clobber a real customization — only fire when
-    // BOTH fields still hold the exact old defaults.
+fn load_or_create_leaves_a_genuinely_customized_target_url_alone() {
+    // The migration must not clobber a real customization — a target_url
+    // that was never the GitHub default is left exactly as the user set it.
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.json");
     std::fs::write(
@@ -376,4 +376,31 @@ fn load_or_create_leaves_a_customized_target_url_alone() {
     let cfg = Config::load_or_create(&path).unwrap();
 
     assert_eq!(cfg.target_url, "https://dash.internal/login");
+}
+
+#[test]
+fn load_or_create_migrates_authenticated_even_when_target_url_was_already_hand_fixed() {
+    // A user who followed an earlier, incomplete workaround (pointing
+    // target_url at claude.ai by hand, before the selector fix shipped)
+    // must not be permanently excluded from the selector migration just
+    // because target_url no longer equals the old default. Each field
+    // migrates on its own.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    std::fs::write(
+        &path,
+        r##"{
+          "target_url": "https://claude.ai/new",
+          "selectors": { "authenticated": "meta[name=\"user-login\"]" }
+        }"##,
+    )
+    .unwrap();
+
+    let cfg = Config::load_or_create(&path).unwrap();
+
+    assert_eq!(cfg.target_url, "https://claude.ai/new");
+    assert_eq!(
+        cfg.selectors.authenticated,
+        "[data-testid=\"user-menu-button\"]"
+    );
 }
