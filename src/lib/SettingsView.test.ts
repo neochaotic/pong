@@ -205,7 +205,7 @@ describe("SettingsView", () => {
     await user.click(screen.getByTestId("restore-defaults"));
     await user.click(screen.getByTestId("restore-defaults"));
 
-    expect(field("target_url")).toHaveValue("https://github.com/login");
+    expect(field("target_url")).toHaveValue("https://claude.ai/new");
     expect(field("cron")).toHaveValue("0 0 5 * * Mon-Fri");
     expect(onSave).not.toHaveBeenCalled();
   });

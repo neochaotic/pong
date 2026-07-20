@@ -40,7 +40,12 @@ fn default_target_url() -> String {
     // A real login page makes the out-of-the-box experience meaningful: sign in
     // once through the dashboard window and confirm the session survives a
     // restart. Paired with `Interaction::ProbeOnly`, nothing is ever typed.
-    "https://github.com/login".to_string()
+    //
+    // claude.ai, not some generic placeholder — Pong is marketed specifically as
+    // a Claude.ai companion, so a fresh install pointing anywhere else (this used
+    // to default to github.com/login) reads as broken rather than "not yet
+    // configured for you."
+    "https://claude.ai/new".to_string()
 }
 /// 5am, Monday through Friday. Six fields: sec min hour dom month dow.
 ///
