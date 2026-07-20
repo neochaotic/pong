@@ -98,7 +98,11 @@ mod tests {
                 submit_button: None,
                 response: None,
             },
-            cleanup: Cleanup::default(),
+            cleanup: Cleanup {
+                menu_button: None,
+                delete_option: None,
+                confirm_button: None,
+            },
             payload: payload.into(),
             settle_ms: 3000,
             typing_delay_ms: 60,

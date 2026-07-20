@@ -63,21 +63,22 @@ fn default_authenticated() -> String {
     "[data-testid=\"user-menu-button\"]".to_string()
 }
 fn default_login_indicator() -> String {
-    // NOT verified against claude.ai's actual login screen — `scripts/
-    // claude_automation.js inspect-logged-out` hits a Cloudflare bot
-    // challenge before reaching it (see script comments), so this is still
-    // the generic "some login form has a password field" placeholder. Sign-in
-    // is email/magic-link based on claude.ai, so this likely never matches
-    // there either; `authenticated` not matching is what actually drives the
-    // unauthorized-detection path in practice. Tracked as a follow-up.
-    "input[type=password]".to_string()
+    // claude.ai's email field on the sign-in screen — sign-in there is
+    // email/magic-link based, not password based, so the old generic
+    // "input[type=password]" placeholder never matched anything real.
+    // Verified by hand against the actual login screen.
+    "[data-testid=\"email\"]".to_string()
 }
 fn default_text_input() -> String {
-    // Matches a plain textarea and a ProseMirror-style rich editor alike.
-    "textarea, div[contenteditable=\"true\"]".to_string()
+    // claude.ai's chat input, verified against the real DOM. More precise
+    // than a generic "any textarea or contenteditable div" pattern, which
+    // risks matching some other editable element on a busier page.
+    "[data-testid=\"chat-input\"]".to_string()
 }
 fn default_payload() -> String {
-    "ping".to_string()
+    // Short, unambiguous, and asks for a short reply — keeps a real full
+    // check's response capture and settle time cheap.
+    "Reply with exactly one word: OK".to_string()
 }
 fn default_settle_ms() -> u64 {
     3_000
@@ -92,7 +93,29 @@ fn default_true() -> bool {
     true
 }
 fn default_interaction() -> Interaction {
-    Interaction::ProbeOnly
+    // `Interaction::Full` is itself the type's `#[default]` — this just keeps
+    // the two in sync explicitly, since serde's `default = "..."` attribute
+    // needs a function, not a derive. A true synthetic transaction (type,
+    // submit, wait for the reply) is what "Ping Now" and the scheduled
+    // warm-up are for; the selectors below are real, verified claude.ai
+    // values, not placeholders, so there's nothing unsafe left to guard
+    // against defaulting to it.
+    Interaction::Full
+}
+fn default_submit_button() -> Option<String> {
+    Some(r#"button[aria-label*="Send"], button[aria-label*="Enviar"]"#.to_string())
+}
+fn default_response() -> Option<String> {
+    Some(".font-claude-response-body".to_string())
+}
+fn default_cleanup_menu_button() -> Option<String> {
+    Some(r#"[data-testid="page-header"] button[aria-label^="More options for"]"#.to_string())
+}
+fn default_cleanup_delete_option() -> Option<String> {
+    Some(r#"[data-testid="delete-chat-trigger"]"#.to_string())
+}
+fn default_cleanup_confirm_button() -> Option<String> {
+    Some(r#"[role="dialog"] .text-on-danger, [role="alertdialog"] .text-on-danger"#.to_string())
 }
 fn default_usage_url() -> Option<String> {
     Some("https://claude.ai/settings/usage".to_string())
@@ -132,13 +155,13 @@ pub struct Selectors {
     /// Optional submit button. When set, the check waits for it to become
     /// enabled and clicks it instead of relying on the Enter key — which is
     /// what a React form with a disabled-until-valid button expects.
-    #[serde(default)]
+    #[serde(default = "default_submit_button")]
     pub submit_button: Option<String>,
     /// Optional selector matching each reply bubble (e.g. one per assistant
     /// turn). When set, a successful check waits for the *last* match's text
     /// to stop changing and reports it as the check's detail, instead of a
     /// generic "dashboard responded".
-    #[serde(default)]
+    #[serde(default = "default_response")]
     pub response: Option<String>,
 }
 
@@ -149,8 +172,8 @@ impl Default for Selectors {
             login_indicator: default_login_indicator(),
             action_button: None,
             text_input: default_text_input(),
-            submit_button: None,
-            response: None,
+            submit_button: default_submit_button(),
+            response: default_response(),
         }
     }
 }
@@ -163,18 +186,28 @@ impl Default for Selectors {
 /// whose delete flow has no confirmation step can leave `confirm_button`
 /// unset. All three are independent: a missing step is simply skipped, not
 /// an error.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Cleanup {
     /// Opens the menu that holds the delete option (e.g. a conversation's
     /// "⋯" button).
-    #[serde(default)]
+    #[serde(default = "default_cleanup_menu_button")]
     pub menu_button: Option<String>,
     /// The delete/remove option, inside that menu or standalone.
-    #[serde(default)]
+    #[serde(default = "default_cleanup_delete_option")]
     pub delete_option: Option<String>,
     /// Confirms the destructive action in a follow-up dialog, if any.
-    #[serde(default)]
+    #[serde(default = "default_cleanup_confirm_button")]
     pub confirm_button: Option<String>,
+}
+
+impl Default for Cleanup {
+    fn default() -> Self {
+        Self {
+            menu_button: default_cleanup_menu_button(),
+            delete_option: default_cleanup_delete_option(),
+            confirm_button: default_cleanup_confirm_button(),
+        }
+    }
 }
 
 impl Cleanup {
@@ -233,8 +266,11 @@ pub struct Config {
     pub autostart_enabled: bool,
     /// Whether a check drives the page or merely inspects it.
     ///
-    /// Defaults to `probe_only` so a freshly installed app never types into
-    /// whatever happens to be configured.
+    /// Defaults to `full` — a real synthetic transaction (type, submit, wait
+    /// for the reply) is the actual point of both "Ping Now" and the
+    /// scheduled warm-up (see the README's "Timing the warm-up"); `probe_only`
+    /// alone never opens a usage window. Set to `probe_only` to fall back to
+    /// a read-only DOM check instead.
     #[serde(default = "default_interaction")]
     pub interaction: Interaction,
     /// Claude.ai's usage-limits page, e.g. `https://claude.ai/settings/usage`.
@@ -291,13 +327,44 @@ impl Config {
             // dropped by a Settings save reconstructing Config from form
             // fields alone (toConfig() in configForm.ts has no way to pass
             // through a field it doesn't know about).
-            let migration_marker = path.with_file_name(".usage_dashboard_migration_done");
-            if !migration_marker.exists() {
+            let usage_marker = path.with_file_name(".usage_dashboard_migration_done");
+            if !usage_marker.exists() {
                 if cfg.usage_url.is_none() {
                     cfg.usage_url = default_usage_url();
                     needs_save = true;
                 }
-                let _ = std::fs::write(&migration_marker, "");
+                let _ = std::fs::write(&usage_marker, "");
+            }
+
+            // Same one-time-only shape as the usage dashboard migration above,
+            // and for the same reason: `probe_only` is also a legitimate
+            // deliberate choice for someone who wants read-only checks, so
+            // this must never re-fire and undo that later. Bundled as a
+            // single migration because they're only safe together — flipping
+            // `interaction` to `full` while leaving `submit_button`/
+            // `response`/`cleanup` at their old `None` defaults would run
+            // real synthetic transactions with no reply capture and, worse,
+            // no post-check cleanup, leaving a stray conversation behind on
+            // every single check.
+            let full_marker = path.with_file_name(".full_interaction_migration_done");
+            if !full_marker.exists() {
+                if cfg.interaction == Interaction::ProbeOnly {
+                    cfg.interaction = default_interaction();
+                    needs_save = true;
+                }
+                if cfg.selectors.submit_button.is_none() {
+                    cfg.selectors.submit_button = default_submit_button();
+                    needs_save = true;
+                }
+                if cfg.selectors.response.is_none() {
+                    cfg.selectors.response = default_response();
+                    needs_save = true;
+                }
+                if !cfg.cleanup.is_configured() {
+                    cfg.cleanup = Cleanup::default();
+                    needs_save = true;
+                }
+                let _ = std::fs::write(&full_marker, "");
             }
 
             if needs_save {

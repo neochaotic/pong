@@ -39,8 +39,9 @@ export const DEFAULT_CRON = "0 0 5 * * Mon-Fri";
 
 /**
  * Mirrors `Config::default()` in `config.rs` field-for-field — a real login
- * page (claude.ai's) and `probe_only`, so "Restore defaults" hands back
- * something a fresh install would actually ship with, not an empty form.
+ * page (claude.ai's), real verified selectors, and `full` interaction, so
+ * "Restore defaults" hands back something that actually works as a real
+ * synthetic transaction out of the box, not an empty form.
  */
 export const DEFAULT_CONFIG: Config = {
   target_url: "https://claude.ai/new",
@@ -48,20 +49,24 @@ export const DEFAULT_CONFIG: Config = {
   cron_enabled: false,
   selectors: {
     authenticated: '[data-testid="user-menu-button"]',
-    login_indicator: "input[type=password]",
+    login_indicator: '[data-testid="email"]',
     action_button: null,
-    text_input: 'textarea, div[contenteditable="true"]',
-    submit_button: null,
-    response: null,
+    text_input: '[data-testid="chat-input"]',
+    submit_button: 'button[aria-label*="Send"], button[aria-label*="Enviar"]',
+    response: ".font-claude-response-body",
   },
-  cleanup: { menu_button: null, delete_option: null, confirm_button: null },
-  payload: "ping",
+  cleanup: {
+    menu_button: '[data-testid="page-header"] button[aria-label^="More options for"]',
+    delete_option: '[data-testid="delete-chat-trigger"]',
+    confirm_button: '[role="dialog"] .text-on-danger, [role="alertdialog"] .text-on-danger',
+  },
+  payload: "Reply with exactly one word: OK",
   settle_ms: 3_000,
   typing_delay_ms: 60,
   element_timeout_ms: 10_000,
   notifications_enabled: true,
   autostart_enabled: true,
-  interaction: "probe_only",
+  interaction: "full",
   usage_url: "https://claude.ai/settings/usage",
 };
 

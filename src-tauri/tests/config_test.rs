@@ -72,11 +72,13 @@ fn autostart_can_be_disabled() {
 }
 
 #[test]
-fn defaults_to_probe_only_so_a_fresh_install_never_types() {
-    // The default target is a real account. Typing into it on a schedule could
-    // post a comment or submit a form once per cron tick, forever.
+fn defaults_to_full_so_ping_now_is_a_real_synthetic_transaction() {
+    // A real login page + real, verified claude.ai selectors below (payload,
+    // text_input, submit_button, response, cleanup) make this safe: "Ping
+    // Now" and the scheduled warm-up only do what they advertise — type,
+    // submit, wait for the reply — when interaction actually drives the page.
     let cfg = Config::from_json("{}").unwrap();
-    assert_eq!(cfg.interaction, Interaction::ProbeOnly);
+    assert_eq!(cfg.interaction, Interaction::Full);
     assert_eq!(cfg.target_url, "https://claude.ai/new");
 }
 
@@ -87,15 +89,21 @@ fn interaction_can_be_set_to_full() {
 }
 
 #[test]
+fn interaction_can_be_set_to_probe_only() {
+    // The read-only opt-out remains available for anyone who wants it.
+    let cfg = Config::from_json(r##"{"interaction":"probe_only"}"##).unwrap();
+    assert_eq!(cfg.interaction, Interaction::ProbeOnly);
+}
+
+#[test]
 fn rejects_an_unknown_interaction_mode() {
     assert!(Config::from_json(r##"{"interaction":"sometimes"}"##).is_err());
 }
 
 #[test]
-fn default_text_input_matches_both_plain_and_rich_editors() {
+fn default_text_input_is_claudes_chat_input() {
     let cfg = Config::from_json("{}").unwrap();
-    assert!(cfg.selectors.text_input.contains("textarea"));
-    assert!(cfg.selectors.text_input.contains("contenteditable"));
+    assert_eq!(cfg.selectors.text_input, "[data-testid=\"chat-input\"]");
 }
 
 #[test]
@@ -104,7 +112,7 @@ fn applies_defaults_for_omitted_fields() {
     let cfg = Config::from_json("{}").expect("empty object should fall back to defaults");
 
     assert_eq!(cfg.target_url, "https://claude.ai/new");
-    assert_eq!(cfg.payload, "ping");
+    assert_eq!(cfg.payload, "Reply with exactly one word: OK");
     assert_eq!(cfg.settle_ms, 3000);
     assert!(!cfg.cron.is_empty());
     assert!(!cfg.selectors.authenticated.is_empty());
@@ -159,8 +167,17 @@ fn rejects_empty_required_selector() {
 }
 
 #[test]
-fn submit_button_is_optional_and_defaults_to_none() {
+fn submit_button_defaults_to_claudes_send_button() {
     let cfg = Config::from_json("{}").unwrap();
+    assert_eq!(
+        cfg.selectors.submit_button.as_deref(),
+        Some(r##"button[aria-label*="Send"], button[aria-label*="Enviar"]"##)
+    );
+}
+
+#[test]
+fn submit_button_can_be_explicitly_disabled() {
+    let cfg = Config::from_json(r##"{"selectors":{"submit_button":null}}"##).unwrap();
     assert_eq!(cfg.selectors.submit_button, None);
 }
 
@@ -185,8 +202,17 @@ fn rejects_an_empty_submit_button_selector() {
 }
 
 #[test]
-fn response_is_optional_and_defaults_to_none() {
+fn response_defaults_to_claudes_reply_body() {
     let cfg = Config::from_json("{}").unwrap();
+    assert_eq!(
+        cfg.selectors.response.as_deref(),
+        Some(".font-claude-response-body")
+    );
+}
+
+#[test]
+fn response_can_be_explicitly_disabled() {
+    let cfg = Config::from_json(r##"{"selectors":{"response":null}}"##).unwrap();
     assert_eq!(cfg.selectors.response, None);
 }
 
@@ -211,8 +237,21 @@ fn rejects_an_empty_response_selector() {
 }
 
 #[test]
-fn cleanup_is_optional_and_defaults_to_unconfigured() {
+fn cleanup_defaults_to_fully_configured_for_claude_ai() {
+    // A full check that types and submits but never cleans up would fill the
+    // account with stray conversations forever — cleanup is not an
+    // afterthought default, it ships configured from the start.
     let cfg = Config::from_json("{}").unwrap();
+    assert!(cfg.cleanup.menu_button.is_some());
+    assert!(cfg.cleanup.delete_option.is_some());
+    assert!(cfg.cleanup.confirm_button.is_some());
+    assert!(cfg.cleanup.is_configured());
+}
+
+#[test]
+fn cleanup_can_be_explicitly_disabled() {
+    let raw = r##"{"cleanup":{"menu_button":null,"delete_option":null,"confirm_button":null}}"##;
+    let cfg = Config::from_json(raw).unwrap();
     assert_eq!(cfg.cleanup.menu_button, None);
     assert_eq!(cfg.cleanup.delete_option, None);
     assert_eq!(cfg.cleanup.confirm_button, None);
@@ -221,7 +260,7 @@ fn cleanup_is_optional_and_defaults_to_unconfigured() {
 
 #[test]
 fn cleanup_can_be_partially_configured() {
-    let raw = r##"{"cleanup":{"delete_option":"[data-testid=\"delete-chat-trigger\"]"}}"##;
+    let raw = r##"{"cleanup":{"menu_button":null,"delete_option":"[data-testid=\"delete-chat-trigger\"]","confirm_button":null}}"##;
     let cfg = Config::from_json(raw).unwrap();
     assert_eq!(cfg.cleanup.menu_button, None);
     assert_eq!(
@@ -452,4 +491,67 @@ fn load_or_create_never_re_enables_a_deliberately_disabled_usage_dashboard() {
     // A later load must respect that choice, not re-enable it.
     let second = Config::load_or_create(&path).unwrap();
     assert_eq!(second.usage_url, None);
+}
+
+#[test]
+fn load_or_create_enables_full_interaction_once_for_an_existing_install() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    std::fs::write(
+        &path,
+        r##"{"interaction": "probe_only", "selectors": {"submit_button": null, "response": null},
+             "cleanup": {"menu_button": null, "delete_option": null, "confirm_button": null}}"##,
+    )
+    .unwrap();
+
+    let cfg = Config::load_or_create(&path).expect("existing config should still load");
+
+    assert_eq!(cfg.interaction, Interaction::Full);
+    assert!(cfg.selectors.submit_button.is_some());
+    assert!(cfg.selectors.response.is_some());
+    assert!(cfg.cleanup.is_configured());
+}
+
+#[test]
+fn load_or_create_never_re_enables_a_deliberately_disabled_full_interaction() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    std::fs::write(&path, r##"{"interaction": "probe_only"}"##).unwrap();
+
+    let first = Config::load_or_create(&path).unwrap();
+    assert_eq!(first.interaction, Interaction::Full);
+
+    // The user turns it back off by hand and saves.
+    let mut turned_off = first;
+    turned_off.interaction = Interaction::ProbeOnly;
+    turned_off.save(&path).unwrap();
+
+    let second = Config::load_or_create(&path).unwrap();
+    assert_eq!(second.interaction, Interaction::ProbeOnly);
+}
+
+#[test]
+fn load_or_create_does_not_touch_full_interaction_selectors_when_already_customized() {
+    // The migration must not clobber real customizations — only the specific
+    // fields still at their old "unset" defaults are touched.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.json");
+    std::fs::write(
+        &path,
+        r##"{"interaction": "probe_only",
+             "selectors": {"submit_button": "#my-custom-send"},
+             "cleanup": {"delete_option": "#my-custom-delete"}}"##,
+    )
+    .unwrap();
+
+    let cfg = Config::load_or_create(&path).unwrap();
+
+    assert_eq!(
+        cfg.selectors.submit_button.as_deref(),
+        Some("#my-custom-send")
+    );
+    assert_eq!(
+        cfg.cleanup.delete_option.as_deref(),
+        Some("#my-custom-delete")
+    );
 }
