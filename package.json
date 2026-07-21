@@ -1,6 +1,6 @@
 {
   "name": "pongllm",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Synthetic web health monitor that lives in the system tray",
   "type": "module",
   "private": true,
