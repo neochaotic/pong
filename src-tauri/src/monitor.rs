@@ -169,8 +169,14 @@ pub async fn run_usage_check(app: AppHandle, state: Arc<AppState>) {
         return;
     };
 
-    let Some(_guard) = state.try_begin_check() else {
-        log::debug!("usage check skipped: a check is already in flight");
+    // Waits rather than bailing immediately: this mostly runs off the
+    // popover's "just became visible" refresh, i.e. a user is looking at
+    // the screen expecting fresh numbers. A `full` health check can
+    // legitimately hold the guard for several seconds (type, submit, wait
+    // for the reply, clean up) — long enough to collide with that refresh
+    // in practice, not just in theory.
+    let Some(_guard) = state.begin_check_or_wait(Duration::from_secs(15)).await else {
+        log::debug!("usage check skipped: a check was still in flight after waiting");
         return;
     };
 

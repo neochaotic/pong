@@ -4,7 +4,7 @@ use crate::config::Config;
 use crate::health::{HealthReport, Phase, ProbePayload};
 use crate::scheduler;
 use crate::usage::{MetricSnapshot, UsageLogEntry, UsageProbePayload, UsageSnapshot};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local, Utc};
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -115,6 +115,30 @@ impl AppState {
             .map(|_| CheckGuard {
                 running: &self.running,
             })
+    }
+
+    /// Same exclusivity as `try_begin_check`, but polls for up to `timeout`
+    /// instead of giving up immediately.
+    ///
+    /// For a user-initiated action (the DASH refresh button, "Force Check")
+    /// landing mid-check, silently no-oping reads as "the button did
+    /// nothing" — a `full` health check now legitimately takes several
+    /// seconds (type, submit, wait for the reply, clean up), which is easy
+    /// to collide with in practice, not just in theory.
+    pub async fn begin_check_or_wait(
+        &self,
+        timeout: std::time::Duration,
+    ) -> Option<CheckGuard<'_>> {
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            if let Some(guard) = self.try_begin_check() {
+                return Some(guard);
+            }
+            if std::time::Instant::now() >= deadline {
+                return None;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
     }
 
     /// Allocate a fresh correlation id for a probe.
@@ -253,10 +277,13 @@ impl AppState {
 
     pub fn snapshot(&self) -> MonitorSnapshot {
         let cfg = self.config_snapshot();
-        let now = Utc::now();
+        // Local, not Utc: matches the actual installed cron job (see
+        // `Job::new_async_tz(_, Local, _)` in lib.rs) — the countdown shown
+        // to the user must agree with when the check actually fires.
+        let now = Local::now();
         // No job is installed while disabled, so there is no "next run" to
         // project — showing one anyway would promise a check that never comes.
-        let next: Option<DateTime<Utc>> = cfg
+        let next: Option<DateTime<Local>> = cfg
             .cron_enabled
             .then(|| scheduler::next_occurrence(&cfg.cron, now))
             .flatten();
@@ -418,6 +445,42 @@ mod tests {
         }
         bail(&s);
         assert!(s.try_begin_check().is_some(), "Drop must free the slot");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn begin_check_or_wait_succeeds_once_the_holder_drops() {
+        let s = std::sync::Arc::new(state());
+        let first = s.try_begin_check().expect("first caller wins");
+
+        let s2 = s.clone();
+        let waiter = tokio::spawn(async move {
+            s2.begin_check_or_wait(std::time::Duration::from_secs(5))
+                .await
+                .is_some()
+        });
+
+        // Give the waiter a chance to start polling and find the slot taken,
+        // then free it — the waiter must pick it up rather than having
+        // already given up.
+        tokio::time::advance(std::time::Duration::from_millis(250)).await;
+        drop(first);
+
+        assert!(
+            waiter.await.unwrap(),
+            "waiter should acquire the freed slot"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn begin_check_or_wait_times_out_if_never_freed() {
+        let s = state();
+        let _holder = s.try_begin_check().unwrap();
+
+        let waited = s
+            .begin_check_or_wait(std::time::Duration::from_secs(1))
+            .await;
+
+        assert!(waited.is_none(), "must give up once the timeout elapses");
     }
 
     #[test]

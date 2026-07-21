@@ -3,19 +3,24 @@
 //! The async job lives in `lib.rs`; everything here is pure so it can be unit
 //! tested without spinning up a Tokio runtime or a real scheduler.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Local};
 use std::str::FromStr;
 
 /// Compute the first cron occurrence strictly after `after`.
 ///
+/// `after` (and the returned time) is in the machine's local time, matching
+/// the `Job::new_async_tz(_, Local, _)` job actually installed in `lib.rs` —
+/// a schedule like "5am" is meant to land at 5am for whoever set it, not 5am
+/// UTC, which could be the middle of their night depending on where they are.
+///
 /// Returns `None` when the expression is invalid or has no future occurrence.
-pub fn next_occurrence(cron: &str, after: DateTime<Utc>) -> Option<DateTime<Utc>> {
+pub fn next_occurrence(cron: &str, after: DateTime<Local>) -> Option<DateTime<Local>> {
     let schedule = cron::Schedule::from_str(cron).ok()?;
     schedule.after(&after).next()
 }
 
 /// Whole seconds until the next occurrence, saturating at zero.
-pub fn seconds_until_next(cron: &str, now: DateTime<Utc>) -> Option<i64> {
+pub fn seconds_until_next(cron: &str, now: DateTime<Local>) -> Option<i64> {
     next_occurrence(cron, now).map(|next| (next - now).num_seconds().max(0))
 }
 
@@ -37,8 +42,8 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
 
-    fn at(y: i32, mo: u32, d: u32, h: u32, mi: u32, s: u32) -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(y, mo, d, h, mi, s).unwrap()
+    fn at(y: i32, mo: u32, d: u32, h: u32, mi: u32, s: u32) -> DateTime<Local> {
+        Local.with_ymd_and_hms(y, mo, d, h, mi, s).unwrap()
     }
 
     #[test]
@@ -65,8 +70,8 @@ mod tests {
 
     #[test]
     fn returns_none_for_an_invalid_expression() {
-        assert!(next_occurrence("not a cron", Utc::now()).is_none());
-        assert!(next_occurrence("*/5 * * *", Utc::now()).is_none());
+        assert!(next_occurrence("not a cron", Local::now()).is_none());
+        assert!(next_occurrence("*/5 * * *", Local::now()).is_none());
     }
 
     #[test]
@@ -77,7 +82,7 @@ mod tests {
 
     #[test]
     fn seconds_until_next_is_none_when_expression_is_invalid() {
-        assert_eq!(seconds_until_next("nope", Utc::now()), None);
+        assert_eq!(seconds_until_next("nope", Local::now()), None);
     }
 
     #[test]

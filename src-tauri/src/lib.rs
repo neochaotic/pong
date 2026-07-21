@@ -101,7 +101,13 @@ impl CronHandle {
             }
         };
 
-        let job = Job::new_async(cron, move |_uuid, _lock| task()).map_err(|e| e.to_string())?;
+        // `Job::new_async` hardcodes UTC (it's a thin wrapper over
+        // `new_async_tz(schedule, Utc, run)`), so a schedule like "5am"
+        // fired at 5am UTC regardless of the machine's real timezone —
+        // the middle of the night for most of the world. `Local` makes
+        // "5am" mean 5am for whoever actually set the schedule.
+        let job = Job::new_async_tz(cron, chrono::Local, move |_uuid, _lock| task())
+            .map_err(|e| e.to_string())?;
 
         let id = scheduler.add(job).await.map_err(|e| e.to_string())?;
         *guard = Some((scheduler, id));
