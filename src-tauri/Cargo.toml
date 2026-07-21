@@ -43,6 +43,10 @@ objc2-foundation = { version = "0.3", features = ["NSProcessInfo", "NSString"] }
 
 [dev-dependencies]
 tempfile = "3"
+# test-util (paused/advanceable virtual time) is additive to the main tokio
+# dependency's features and only compiled into test builds, never the
+# release binary.
+tokio = { version = "1", features = ["test-util"] }
 
 [features]
 # Used by CI/tests to compile the pure-logic modules without a display server.
